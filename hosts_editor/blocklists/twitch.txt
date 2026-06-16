@@ -1,0 +1,14 @@
+0.0.0.0	assets.twitch.tv
+0.0.0.0	extensions-discovery-images.twitch.tv
+0.0.0.0	global.poe.live-video.net
+0.0.0.0	gql.twitch.tv
+0.0.0.0	hermes.twitch.tv
+0.0.0.0	irc-ws.chat.twitch.tv
+0.0.0.0	k.twitchcdn.net
+0.0.0.0	panels.twitch.tv
+0.0.0.0	pubsub-edge.twitch.tv
+0.0.0.0	static-cdn.jtvnw.net
+0.0.0.0	supervisor.ext-twitch.tv
+0.0.0.0	twitch.tv
+0.0.0.0	usher.ttvnw.net
+0.0.0.0	www.twitch.tv
