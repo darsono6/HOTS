@@ -16,13 +16,13 @@ HOSTS_PATH = (
     else "/etc/hosts"
 )
 
-# Settings file lives in the user directory, not next to .pyw,
-# to avoid permission issues when running as administrator.
+# All per-user data lives under a single HOTS\ subdirectory so that
+# settings, DNS backup and AntiSpy backup are cleaned up together.
 if platform.system() == "Windows":
-    _cfg_dir = Path(os.environ.get("APPDATA", Path.home()))
+    _cfg_dir = Path(os.environ.get("APPDATA", Path.home())) / "HOTS"
 else:
-    _cfg_dir = Path.home()
-SETTINGS_PATH = _cfg_dir / "hosts_editor_settings.json"
+    _cfg_dir = Path.home() / ".hots"
+SETTINGS_PATH = _cfg_dir / "settings.json"
 
 # ── Color palette ──────────────────────────────────────────────────────────
 DARK = {
@@ -50,6 +50,7 @@ def load_settings() -> dict:
 
 def save_settings(data: dict):
     try:
+        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         SETTINGS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception:
         pass

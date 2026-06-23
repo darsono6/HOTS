@@ -3,10 +3,61 @@ Reusable UI components: buttons, fields, dialogs, dark theme.
 To change button appearance or colors, edit this file.
 """
 
+import sys
 import tkinter as tk
 from tkinter import ttk
 
 from .constants import DARK
+
+
+def enable_rounded_corners(win):
+    """Applies Windows 11 DWM rounded corners and a soft native drop
+    shadow to an overrideredirect() Tk window (main window or any
+    DarkToplevel dialog).
+
+    Safe no-op on Windows 10 and non-Windows platforms: DWM there either
+    doesn't expose the rounded-corner attribute or ignores it, so nothing
+    breaks — the window just keeps square corners, same as before this
+    function existed. The shadow works wherever DWM composition is
+    active (Vista and up — effectively always, since it can't be turned
+    off on Windows 8+).
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+
+        # ── Rounded corners (Windows 11 build 22000+) ───────────────────────
+        # DWMWCP_ROUND = noticeable radius. Use DWMWCP_ROUNDSMALL (3)
+        # instead for a more subtle rounding.
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_ROUND = 2
+        pref = ctypes.c_int(DWMWCP_ROUND)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            ctypes.c_void_p(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(pref), ctypes.sizeof(pref))
+
+        # ── Soft native drop shadow ──────────────────────────────────────────
+        # overrideredirect() creates a borderless (WS_POPUP-style) window,
+        # which DWM doesn't shadow automatically. DwmExtendFrameIntoClientArea
+        # with a near-zero margin tricks DWM into thinking the window has a
+        # frame, so it renders its normal soft shadow — the same one every
+        # ordinary bordered Win32 window gets for free. This replaces the
+        # older CS_DROPSHADOW class style, which gives a small, hard-edged
+        # shadow that tends to look like a flat outline rather than a blur.
+        class _Margins(ctypes.Structure):
+            _fields_ = [("cxLeftWidth",    ctypes.c_int),
+                        ("cxRightWidth",   ctypes.c_int),
+                        ("cyTopHeight",    ctypes.c_int),
+                        ("cyBottomHeight", ctypes.c_int)]
+        margins = _Margins(0, 0, 0, 1)
+        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(
+            ctypes.c_void_p(hwnd), ctypes.byref(margins))
+    except Exception:
+        # Cosmetic only — never let a missing API or older Windows
+        # build take down window creation.
+        pass
 
 
 # ── Custom title bar ───────────────────────────────────────────────────────
@@ -82,6 +133,12 @@ class CustomTitlebar(tk.Frame):
             self._parent.unbind("<Map>")
             self._parent.overrideredirect(True)
             self._parent.lift()
+            # overrideredirect() destroys and recreates the native window
+            # handle, so the rounded-corners/shadow attributes set at
+            # startup were applied to a handle that no longer exists —
+            # they have to be re-applied to the new one.
+            self._parent.update_idletasks()
+            enable_rounded_corners(self._parent)
 
     def _toggle_maximize(self, _=None):
         if self._maximized:
@@ -143,6 +200,157 @@ def _restore_icon(win):
         pass
 
 
+class DarkToplevel(tk.Toplevel):
+    """Shared base for dialog windows: dark titlebar with a gold accent
+    stripe + gold title (matching CustomTitlebar's style), a thin gold
+    rule under the titlebar, and a close button with the same hover
+    behavior as the main window.
+
+    Subclasses pack their content into ``self.body``.
+    """
+    _TB_HEIGHT = 38
+
+    def __init__(self, parent, title="", on_close=None,
+                 body_bg=None, padx=0, pady=0,
+                 resizable=False, min_width=320, min_height=200):
+        super().__init__(parent)
+        # Hidden until center_on_parent() positions it correctly — otherwise
+        # the window briefly flashes at Tk's default placement (top-left-ish)
+        # before jumping to its real spot.
+        self.withdraw()
+        self.overrideredirect(True)
+        body_bg = body_bg or DARK["bg"]
+        # The toplevel itself is colored with the border shade; a 1px inset
+        # container in the real body color creates a thin outline around
+        # the whole window, so it doesn't blend into the app behind it.
+        self.configure(bg=DARK["border"])
+        self.resizable(resizable, resizable)
+        # grab_set() is deferred to center_on_parent() — calling it on a
+        # withdrawn window raises "grab failed: window not viewable".
+
+        self._parent       = parent
+        self._on_close_cb  = on_close
+        self._min_w        = min_width
+        self._min_h        = min_height
+
+        container = tk.Frame(self, bg=body_bg)
+        container.pack(fill="both", expand=True, padx=1, pady=1)
+        self._container = container
+
+        # ── Titlebar ─────────────────────────────────────────────────────
+        tb = tk.Frame(container, bg=DARK["bg2"], height=self._TB_HEIGHT)
+        tb.pack(fill="x", side="top")
+        tb.pack_propagate(False)
+
+        self._title_lbl = tk.Label(
+            tb, text=title, bg=DARK["bg2"], fg=DARK["accent"],
+            font=("Segoe UI", 9), padx=10)
+        self._title_lbl.pack(side="left", fill="y")
+
+        close_lbl = tk.Label(tb, text="✕", bg=DARK["bg2"], fg=DARK["fg2"],
+                              font=("Segoe UI", 11), cursor="hand2", width=4)
+        close_lbl.pack(side="right", fill="y")
+        close_lbl.bind("<Enter>",    lambda _: close_lbl.configure(bg="#3a1010", fg="#c84040"))
+        close_lbl.bind("<Leave>",    lambda _: close_lbl.configure(bg=DARK["bg2"], fg=DARK["fg2"]))
+        close_lbl.bind("<Button-1>", lambda _: self._close())
+
+        for w in (tb, self._title_lbl):
+            w.bind("<ButtonPress-1>", self._drag_start)
+            w.bind("<B1-Motion>",     self._drag_move)
+
+        # ── Thin gold accent rule under the titlebar ───────────────────────
+        tk.Frame(container, bg=DARK["accent"], height=2).pack(fill="x", side="top")
+
+        # ── Body — subclasses build their content in here ──────────────────
+        self.body = tk.Frame(container, bg=body_bg, padx=padx, pady=pady)
+        self.body.pack(fill="both", expand=True)
+
+        # ── Resize grip (bottom-right corner) — only when resizable=True ───
+        # overrideredirect() removes the native resize border entirely, so
+        # without this, a resizable=True window couldn't actually be resized.
+        if resizable:
+            self._add_resize_grip(container, body_bg)
+
+    def _add_resize_grip(self, container, body_bg):
+        # Drawn with Canvas dots rather than a Unicode glyph, so it renders
+        # identically regardless of font/emoji support on the target machine.
+        size = 14
+        grip = tk.Canvas(container, width=size, height=size, bg=body_bg,
+                         highlightthickness=0, cursor="size_nw_se")
+        grip.place(relx=1.0, rely=1.0, anchor="se", x=-2, y=-2)
+        dot = DARK["fg2"]
+        for row in range(3):
+            for col in range(row + 1):
+                x = size - 3 - row * 4
+                y = size - 3 - col * 4
+                grip.create_oval(x - 1, y - 1, x + 1, y + 1, fill=dot, outline=dot)
+        grip.bind("<ButtonPress-1>", self._resize_start)
+        grip.bind("<B1-Motion>",     self._resize_move)
+        grip.bind("<ButtonRelease-1>", self._resize_end)
+
+    def _resize_start(self, event):
+        self._rs_x = event.x_root
+        self._rs_y = event.y_root
+        self._rs_w = self.winfo_width()
+        self._rs_h = self.winfo_height()
+        self._rs_pending  = None
+        self._rs_scheduled = False
+
+    def _resize_move(self, event):
+        new_w = max(self._min_w, self._rs_w + (event.x_root - self._rs_x))
+        new_h = max(self._min_h, self._rs_h + (event.y_root - self._rs_y))
+        # Coalesce rapid <B1-Motion> events into the latest size only —
+        # calling self.geometry() on every single motion event queues up
+        # a full reflow (canvas/scrollregion/cards) faster than Tk can
+        # process them, which is what causes the second-or-so visible lag
+        # on content-heavy windows like Parental Control.
+        self._rs_pending = (new_w, new_h)
+        if not self._rs_scheduled:
+            self._rs_scheduled = True
+            self.after(16, self._apply_pending_resize)
+
+    def _apply_pending_resize(self):
+        self._rs_scheduled = False
+        if self._rs_pending and self.winfo_exists():
+            w, h = self._rs_pending
+            self._rs_pending = None
+            self.geometry(f"{w}x{h}")
+
+    def _resize_end(self, _event=None):
+        # Apply the final size immediately on mouse release instead of
+        # waiting for the next throttled tick — shaves off the small
+        # extra delay that would otherwise linger after the user has
+        # already stopped dragging.
+        if self._rs_pending and self.winfo_exists():
+            w, h = self._rs_pending
+            self._rs_pending = None
+            self.geometry(f"{w}x{h}")
+
+    def _close(self):
+        if self._on_close_cb:
+            self._on_close_cb()
+        else:
+            self.destroy()
+
+    def _drag_start(self, event):
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _drag_move(self, event):
+        self.geometry(f"+{event.x_root - self._drag_x}+{event.y_root - self._drag_y}")
+
+    def center_on_parent(self, min_w=0, min_h=0):
+        # Geometry is computed while still hidden (winfo_reqwidth/reqheight
+        # work fine on a withdrawn window), so nothing is visible until the
+        # window is already in its final spot — no flash-then-jump.
+        center_on_parent(self, self._parent, min_w, min_h)
+        self.deiconify()
+        self.lift()
+        self.update_idletasks()
+        enable_rounded_corners(self)
+        self.grab_set()
+
+
 def center_on_parent(win, parent, min_w=0, min_h=0):
     win.update_idletasks()
     sw = win.winfo_screenwidth()
@@ -151,10 +359,17 @@ def center_on_parent(win, parent, min_w=0, min_h=0):
     req_h = max(win.winfo_reqheight(), min_h)
     w = min(req_w, sw - 40)
     h = min(req_h, sh - 80)
-    px = parent.winfo_rootx() + parent.winfo_width()  // 2
-    py = parent.winfo_rooty() + parent.winfo_height() // 2
-    x = max(0, min(px - w // 2, sw - w - 20))
-    y = max(0, min(py - h // 2, sh - h - 60))
+    if parent.winfo_width() <= 1 or parent.winfo_height() <= 1:
+        # parent isn't mapped/realized yet (e.g. the password prompt shown
+        # at startup, before the main window has a real size/position) —
+        # its geometry would be garbage, so center on the screen instead.
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2)
+    else:
+        px = parent.winfo_rootx() + parent.winfo_width()  // 2
+        py = parent.winfo_rooty() + parent.winfo_height() // 2
+        x = max(0, min(px - w // 2, sw - w - 20))
+        y = max(0, min(py - h // 2, sh - h - 60))
     win.geometry(f"{w}x{h}+{x}+{y}")
 
 
@@ -167,14 +382,10 @@ class DarkDialog:
         # Lazy import of T — avoids circular import at startup
         from .i18n import T
         result = [None]
-        win = tk.Toplevel(parent)
-        win.title(title)
-        win.configure(bg=DARK["bg2"])
-        win.resizable(False, False)
-        win.transient(parent)
-        win.grab_set()
+        win = DarkToplevel(parent, title=title, body_bg=DARK["bg2"],
+                            on_close=lambda: (result.__setitem__(0, None), win.destroy()))
 
-        body = tk.Frame(win, bg=DARK["bg2"])
+        body = tk.Frame(win.body, bg=DARK["bg2"])
         body.pack(padx=20, pady=(18, 10), fill="x")
         tk.Label(body, text=icon, bg=DARK["bg2"], fg=DARK["fg"],
                  font=("Segoe UI Emoji", 22)).pack(side="left", padx=(0, 14), anchor="n")
@@ -182,7 +393,7 @@ class DarkDialog:
                  font=("Segoe UI", 10), justify="left",
                  wraplength=360).pack(side="left", anchor="w")
 
-        bf = tk.Frame(win, bg=DARK["bg2"])
+        bf = tk.Frame(win.body, bg=DARK["bg2"])
         bf.pack(pady=(4, 16))
         for label, val in buttons:
             accent = val is True or val == "ok"
@@ -192,11 +403,7 @@ class DarkDialog:
             b.pack(side="left", padx=6)
 
         win.update_idletasks()
-        pw = parent.winfo_rootx() + parent.winfo_width()  // 2
-        ph = parent.winfo_rooty() + parent.winfo_height() // 2
-        ww = win.winfo_width()
-        wh = win.winfo_height()
-        win.geometry(f"+{pw - ww//2}+{ph - wh//2}")
+        win.center_on_parent()
         win.wait_window()
         return result[0]
 

@@ -8,7 +8,7 @@ import tkinter as tk
 
 from ..constants import DARK
 from ..core import is_valid_ip
-from ..widgets import make_btn, dark_entry, field_lbl, DarkDialog, center_on_parent
+from ..widgets import make_btn, dark_entry, field_lbl, DarkDialog, DarkToplevel
 from ..i18n import T
 
 
@@ -53,15 +53,14 @@ def _parse_bulk(text: str) -> list:
     return results
 
 
-class EntryDialog(tk.Toplevel):
+class EntryDialog(DarkToplevel):
     def __init__(self, parent, entry=None, existing_hostnames=None):
-        super().__init__(parent)
-        self.title(T("entry_title_add") if entry is None else T("entry_title_edit"))
-        self.configure(bg=DARK["bg2"])
-        self.resizable(False, False)
+        title = T("entry_title_add") if entry is None else T("entry_title_edit")
+        super().__init__(parent, title=title, body_bg=DARK["bg2"],
+                          min_width=420, min_height=280)
 
-        self.columnconfigure(0, weight=0)
-        self.columnconfigure(1, weight=1)
+        self.body.columnconfigure(0, weight=0)
+        self.body.columnconfigure(1, weight=1)
 
         self.result = None
         self.result_list = None
@@ -69,13 +68,13 @@ class EntryDialog(tk.Toplevel):
         self._is_edit = entry is not None
 
         # Row 0: IP
-        field_lbl(self, T("entry_lbl_ip"), 0)
+        field_lbl(self.body, T("entry_lbl_ip"), 0)
         self.ip_var = tk.StringVar(value=entry["ip"] if entry else "0.0.0.0")
-        self.ip_entry = dark_entry(self, self.ip_var, width=22)
+        self.ip_entry = dark_entry(self.body, self.ip_var, width=22)
         self.ip_entry.grid(row=0, column=1, sticky="w", padx=12, pady=(7, 2))
 
         # Row 1: IP hint
-        self._ip_hint = tk.Label(self, text="", bg=DARK["bg2"],
+        self._ip_hint = tk.Label(self.body, text="", bg=DARK["bg2"],
                                  fg=DARK["red"], font=("Segoe UI", 8))
         self._ip_hint.grid(row=1, column=1, sticky="w", padx=12, pady=(0, 4))
 
@@ -84,27 +83,27 @@ class EntryDialog(tk.Toplevel):
         self.after(10, self._validate_ip)
 
         # Row 2: Hostname
-        field_lbl(self, T("entry_lbl_host"), 2)
+        field_lbl(self.body, T("entry_lbl_host"), 2)
         self.host_var = tk.StringVar(value=entry["hostname"] if entry else "")
-        self._host_entry = dark_entry(self, self.host_var, width=34)
+        self._host_entry = dark_entry(self.body, self.host_var, width=34)
         self._host_entry.grid(row=2, column=1, sticky="w", padx=12, pady=(7, 2))
 
         # Row 3: Hostname hint
-        self._host_hint = tk.Label(self, text="", bg=DARK["bg2"],
+        self._host_hint = tk.Label(self.body, text="", bg=DARK["bg2"],
                                    fg="#f0c040", font=("Segoe UI", 8),
                                    wraplength=260, justify="left")
         self._host_hint.grid(row=3, column=1, sticky="w", padx=12, pady=(0, 4))
         self.host_var.trace_add("write", self._on_host_change)
 
         # Row 4: Comment
-        field_lbl(self, T("entry_lbl_comment"), 4)
+        field_lbl(self.body, T("entry_lbl_comment"), 4)
         self.com_var = tk.StringVar(value=entry["comment"] if entry else "")
-        dark_entry(self, self.com_var, width=34).grid(row=4, column=1, sticky="w",
+        dark_entry(self.body, self.com_var, width=34).grid(row=4, column=1, sticky="w",
                                                       padx=12, pady=7)
 
         # Row 5: Status
         self.enabled_var = tk.BooleanVar(value=entry["enabled"] if entry else True)
-        tk.Checkbutton(self, text=T("entry_lbl_active"), variable=self.enabled_var,
+        tk.Checkbutton(self.body, text=T("entry_lbl_active"), variable=self.enabled_var,
                        bg=DARK["bg2"], fg=DARK["fg"],
                        activebackground=DARK["bg2"], activeforeground=DARK["fg"],
                        selectcolor=DARK["bg3"],
@@ -112,15 +111,12 @@ class EntryDialog(tk.Toplevel):
                                                    padx=12, pady=4)
 
         # Row 6: Buttons
-        bf = tk.Frame(self, bg=DARK["bg2"])
+        bf = tk.Frame(self.body, bg=DARK["bg2"])
         bf.grid(row=6, column=0, columnspan=2, pady=14)
         make_btn(bf, "💾", "#60c8ff", T("entry_btn_save"), self._save, accent=True).pack(side="left", padx=6)
         make_btn(bf, "✖",  "#e05050", T("entry_btn_cancel"), self.destroy).pack(side="left", padx=6)
 
-        self.transient(parent)
-        self.grab_set()
-        center_on_parent(self, parent, min_w=420, min_h=280)
-        self._parent = parent
+        self.center_on_parent(min_w=420, min_h=280)
         self.wait_window()
 
     def _refit(self):

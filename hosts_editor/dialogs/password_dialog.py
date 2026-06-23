@@ -9,7 +9,7 @@ import hashlib
 import tkinter as tk
 
 from ..constants import DARK
-from ..widgets   import DarkDialog, make_btn
+from ..widgets   import DarkDialog, DarkToplevel, make_btn
 from ..i18n      import T
 
 
@@ -35,52 +35,21 @@ def _make_pass_entry(parent) -> tk.Entry:
     )
 
 
-class _BasePassDialog(tk.Toplevel):
+class _BasePassDialog(DarkToplevel):
     def __init__(self, parent, title: str):
-        super().__init__(parent)
-        self.overrideredirect(True)
-        self.configure(bg=DARK["bg"])
-        self.resizable(False, False)
-        self.grab_set()
+        super().__init__(parent, title=title, body_bg=DARK["bg"], padx=22, pady=18)
+        self._body = self.body  # kept for compatibility with existing _build_body() code
 
-        tb = tk.Frame(self, bg=DARK["bg3"], height=32)
-        tb.pack(fill="x")
-        tb.pack_propagate(False)
-        tk.Label(tb, text=title, bg=DARK["bg3"], fg=DARK["fg"],
-                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=10, pady=6)
-        close_lbl = tk.Label(tb, text="✕", bg=DARK["bg3"], fg=DARK["fg2"],
-                              font=("Segoe UI", 11), cursor="hand2", padx=10)
-        close_lbl.pack(side="right")
-        close_lbl.bind("<Button-1>", lambda _: self._on_cancel())
-        tb.bind("<ButtonPress-1>", self._drag_start)
-        tb.bind("<B1-Motion>",     self._drag_move)
-
-        self._body = tk.Frame(self, bg=DARK["bg"], padx=22, pady=18)
-        self._body.pack(fill="both", expand=True)
+    def _close(self):
+        # Routes the titlebar ✕ through the same hook subclasses already use
+        self._on_cancel()
 
     def _on_cancel(self):
         self.destroy()
 
-    def _drag_start(self, e):
-        self._dx = e.x_root - self.winfo_x()
-        self._dy = e.y_root - self.winfo_y()
-
-    def _drag_move(self, e):
-        self.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
-
     def _center(self, parent):
-        self.update_idletasks()
-        w = self.winfo_reqwidth()
-        h = self.winfo_reqheight()
-        if parent.winfo_width() <= 1 or parent.winfo_height() <= 1:
-            sw = self.winfo_screenwidth()
-            sh = self.winfo_screenheight()
-            x  = (sw - w) // 2
-            y  = (sh - h) // 2
-        else:
-            x = parent.winfo_rootx() + (parent.winfo_width()  - w) // 2
-            y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
-        self.geometry(f"+{x}+{y}")
+        # Kept for backward compatibility — delegates to the shared helper
+        self.center_on_parent()
 
 
 class SetPasswordDialog(_BasePassDialog):
@@ -195,13 +164,13 @@ class PasswordPromptDialog(_BasePassDialog):
         super().__init__(parent, T("pwd_prompt_title"))
         self._cur_hash   = current_hash
         self._on_success = on_success
-        self._on_cancel  = on_cancel or (lambda: sys.exit(0))
+        self._cancel_cb  = on_cancel or (lambda: sys.exit(0))
         self._build_body()
         self._center(parent)
 
     def _on_cancel(self):
         self.destroy()
-        self._on_cancel()  # type: ignore[misc]
+        self._cancel_cb()
 
     def _build_body(self):
         body = self._body

@@ -9,6 +9,7 @@ import csv
 import shutil
 import socket
 import fnmatch
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog
@@ -163,8 +164,16 @@ def save_hosts(path, entries: list) -> bool:
 
     text_content = entries_to_text(entries)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text_content)
+        dir_path = os.path.dirname(os.path.abspath(path))
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, prefix=".hosts_tmp_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text_content)
+            os.replace(tmp_path, path)
+        except Exception:
+            try: os.unlink(tmp_path)
+            except OSError: pass
+            raise
     except PermissionError:
         raise PermissionError(T("save_perm_err"))
     except Exception as ex:
@@ -181,7 +190,11 @@ def save_hosts(path, entries: list) -> bool:
     except Exception:
         pass
 
-    # Flush DNS cache on Windows
+    return flush_dns_cache()
+
+
+def flush_dns_cache() -> bool:
+    """Flushes the Windows DNS resolver cache. Returns True on success."""
     import subprocess
     try:
         si = subprocess.STARTUPINFO()
@@ -333,11 +346,11 @@ def dns_lookup_external(hostname, dns_ip="8.8.8.8", port=53, timeout=4):
         q += b"\x00"
         q += _st.pack(">HH", 1, 1)
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(timeout)
-        sock.sendto(q, (dns_ip, port))
-        resp, _ = sock.recvfrom(512)
-        
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.sendto(q, (dns_ip, port))
+            resp, _ = sock.recvfrom(512)
+
         if len(resp) < 12:
             return None
         r_flags = _st.unpack(">H", resp[2:4])[0]

@@ -16,7 +16,7 @@ from .i18n      import T, set_lang, current_lang, LANGUAGES
 from .core      import (parse_hosts, save_hosts, entries_to_text,
                          list_backups, import_hosts_file, export_hosts,
                          is_valid_ip)
-from .widgets   import apply_dark_style, make_btn, _add_paste_menu, DarkDialog, CustomTitlebar
+from .widgets   import apply_dark_style, make_btn, _add_paste_menu, DarkDialog, CustomTitlebar, DarkToplevel, enable_rounded_corners
 from .dialogs   import (EntryDialog, DiffDialog,
                          BackupManagerDialog, DiagnosticsDialog, ParentalDialog,
                          SupportDialog, SetPasswordDialog, PasswordPromptDialog)
@@ -30,6 +30,10 @@ class HostsEditor(tk.Tk):
         self.overrideredirect(True)
         self.configure(bg=DARK["bg"])
         apply_dark_style(self)
+
+        # Subtle rounded corners + native shadow (Windows 11; safe no-op elsewhere)
+        self.update_idletasks()
+        enable_rounded_corners(self)
 
         # Override hover behavior for all scrollbars (accent color instead of white)
         style = ttk.Style()
@@ -74,8 +78,30 @@ class HostsEditor(tk.Tk):
 
         self._build_ui()
         self._fit_window_to_content()
+
+        # Restore maximized state from the previous session
+        if self._settings.get("maximized", False):
+            self.after(50, self._titlebar._toggle_maximize)
+
         self._load()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Deselect table rows when clicking anywhere else in the window
+        # (sidebar, status bar, empty background, titlebar...). Uses bind_all
+        # with a widget-type check so normal clicks on buttons/entries/etc.
+        # are completely unaffected.
+        self.bind_all("<Button-1>", self._on_global_click, add="+")
+
+    def _on_global_click(self, event):
+        widget = event.widget
+        # Clicks inside the table itself are already handled by _on_tree_click
+        if widget is self.tree or str(widget).startswith(str(self.tree)):
+            return
+        # Scrollbar clicks must not deselect — the user is just scrolling
+        if isinstance(widget, ttk.Scrollbar):
+            return
+        if self.tree.selection():
+            self.tree.selection_remove(*self.tree.selection())
 
     def _safe_geometry(self, saved: str) -> str:
         sw = self.winfo_screenwidth()
@@ -133,19 +159,45 @@ class HostsEditor(tk.Tk):
         new_h = max(min_h, start_h + event.y_root - start_y)
         self.geometry(f"{new_w}x{new_h}")
 
+    def _save_settings_merged(self, **updates):
+        """
+        Writes only the given keys, merged onto whatever is currently on
+        disk — never overwrites the whole file with this window's
+        in-memory copy (loaded once at startup), which could otherwise
+        silently erase keys other windows have since written to
+        settings.json (e.g. Parental Control's saved window size, or a
+        dismissed-warning flag) just because this window's own snapshot
+        predates them.
+        """
+        fresh = load_settings()
+        fresh.update(updates)
+        self._settings = fresh
+        save_settings(fresh)
+
     def _on_close(self):
         if self._dirty:
             if not DarkDialog.ask(self, T("dlg_unsaved_title"), T("dlg_unsaved_msg")):
                 return
-        self._settings["geometry"] = self.geometry()
-        self._settings["language"] = current_lang()
-        save_settings(self._settings)
+        tb = self._titlebar
+        if tb._maximized and tb._restore_geo:
+            self._save_settings_merged(
+                geometry=tb._restore_geo,
+                maximized=True,
+                language=current_lang()
+            )
+        else:
+            self._save_settings_merged(
+                geometry=self.geometry(),
+                maximized=False,
+                language=current_lang()
+            )
         self.destroy()
 
     def _build_ui(self):
         # ── Custom title bar ───────────────────────────────────────────────
         self._titlebar = CustomTitlebar(self, title="HOTS", on_close=self._on_close, on_minimize=self.iconify)
         self._titlebar.pack(fill="x", side="top")
+        tk.Frame(self, bg=DARK["accent"], height=2).pack(fill="x", side="top")
 
         self._title_suffix = tk.Label(self._titlebar, text="Developed by Darsono", bg=self._titlebar["bg"], fg=DARK["fg2"], font=("Segoe UI", 9, "normal"))
         self._title_suffix.pack(side="left", padx=(2, 10))
@@ -220,7 +272,46 @@ class HostsEditor(tk.Tk):
         tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
         self._raw_view_btn = _make_option_btn(self._options_panel, "📋", "#80ffb0", T("opt_show_raw"), self._toggle_raw_view)
         tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
-        self._pass_option_btn = _make_option_btn(self._options_panel, "🔒", "#ffd080", self._pass_btn_label(), self._manage_password)
+        # Password button — built manually to support the green dot indicator
+        _pb_f = tk.Frame(self._options_panel, bg=DARK["bg2"], cursor="hand2")
+        _pb_f.pack(fill="x")
+        _pb_inner = tk.Frame(_pb_f, bg=DARK["bg2"], cursor="hand2")
+        _pb_inner.pack(fill="x", padx=8, pady=4)
+        _pb_ico = tk.Label(_pb_inner, text="🔒", bg=DARK["bg2"], fg="#ffd080",
+                           font=("Segoe UI Emoji", 13), cursor="hand2")
+        _pb_ico.pack(side="left", padx=(2, 6))
+        _pb_txt = tk.Label(_pb_inner, text=self._pass_btn_label(), bg=DARK["bg2"],
+                           fg=DARK["fg"], font=("Segoe UI", 9), anchor="w", cursor="hand2")
+        _pb_txt.pack(side="left", fill="x", expand=True)
+        from .__main__ import _reg_get_password as _rgp_init
+        _pb_dot = tk.Label(_pb_inner, text="●", bg=DARK["bg2"],
+                           fg="#4ec94e" if bool(_rgp_init()) else DARK["bg2"],
+                           font=("Segoe UI", 9), cursor="hand2")
+        _pb_dot.pack(side="right", padx=(0, 4))
+        def _pb_enter(_):
+            for w in (_pb_f, _pb_inner, _pb_ico, _pb_txt, _pb_dot):
+                w.config(bg=DARK["accent"])
+            _pb_txt.config(fg=DARK["accent_fg"])
+            _pb_ico.config(fg="#ffd080")
+            if _pb_dot.cget("fg") != DARK["bg2"]:
+                _pb_dot.config(fg="#4ec94e")
+        def _pb_leave(_):
+            bg = DARK["accent"] if getattr(_pb_f, "_active", False) else DARK["bg2"]
+            for w in (_pb_f, _pb_inner, _pb_ico, _pb_txt, _pb_dot):
+                w.config(bg=bg)
+            _pb_txt.config(fg=DARK["fg"])
+            _pb_ico.config(fg="#ffd080")
+            if _pb_dot.cget("fg") != DARK["bg2"]:
+                _pb_dot.config(fg="#4ec94e")
+        for w in (_pb_f, _pb_inner, _pb_ico, _pb_txt, _pb_dot):
+            w.bind("<Enter>", _pb_enter)
+            w.bind("<Leave>", _pb_leave)
+            w.bind("<Button-1>", lambda _: self._manage_password())
+        _pb_f._inner_widgets = (_pb_f, _pb_inner, _pb_ico, _pb_txt, _pb_dot)
+        _pb_f._icon_color = "#ffd080"
+        _pb_f._txt_lbl = _pb_txt
+        _pb_f._dot_lbl = _pb_dot
+        self._pass_option_btn = _pb_f
         tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
         _make_option_btn(self._options_panel, "🌐", "#a0d0ff", T("opt_language"),  self._change_language)
 
@@ -322,6 +413,7 @@ class HostsEditor(tk.Tk):
         self.tree.tag_configure("off", foreground=DARK["gray"])
         self.tree.bind("<Double-1>", lambda _: self._edit())
         self.tree.bind("<Button-3>", self._show_context_menu)
+        self.tree.bind("<Button-1>", self._on_tree_click, add="+")
 
         # ── Status bar ────────────────────────────────────────────────────
         tk.Label(main_area, anchor="e", text=T("hint_multiselect"), padx=10, pady=3, bg=DARK["bg2"], fg=DARK["fg2"], font=("Segoe UI", 8)).pack(fill="x", side="bottom")
@@ -340,16 +432,18 @@ class HostsEditor(tk.Tk):
         return T("opt_pass_on") if has else T("opt_pass_off")
 
     def _refresh_pass_btn(self):
-        """Refreshes the password button label after state change."""
+        """Refreshes the password button label and dot after state change."""
         btn = getattr(self, "_pass_option_btn", None)
         if btn is None:
             return
-        new_label = self._pass_btn_label()
-        for w in btn.winfo_children():          # inner Frame
-            for c in w.winfo_children():
-                if isinstance(c, tk.Label) and str(c.cget("font")).endswith("9"):
-                    c.config(text=new_label)
-                    return
+        from .__main__ import _reg_get_password
+        has = bool(_reg_get_password())
+        txt = getattr(btn, "_txt_lbl", None)
+        dot = getattr(btn, "_dot_lbl", None)
+        if txt:
+            txt.config(text=T("opt_pass_on") if has else T("opt_pass_off"))
+        if dot:
+            dot.config(fg="#4ec94e" if has else DARK["bg2"])
 
     def _manage_password(self):
         """Opens the set/remove password dialog."""
@@ -371,27 +465,19 @@ class HostsEditor(tk.Tk):
             self._options_panel.pack_forget()
             self._options_visible = False
 
-        dlg = tk.Toplevel(self)
-        dlg.title(T("lang_title"))
-        dlg.configure(bg=DARK["bg2"])
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.transient(self)
+        dlg = DarkToplevel(self, title=T("lang_title"), body_bg=DARK["bg2"],
+                            min_width=280, min_height=220)
 
-        # ── Header ────────────────────────────────────────────────────────
-        hdr = tk.Frame(dlg, bg=DARK["accent"], height=4)
-        hdr.pack(fill="x")
-
-        tk.Label(dlg, text="🌐  " + T("lang_title"),
+        tk.Label(dlg.body, text="🌐  " + T("lang_title"),
                  bg=DARK["bg2"], fg=DARK["fg"],
                  font=("Segoe UI", 11, "bold")).pack(pady=(16, 10), padx=24, anchor="w")
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16)
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16)
 
         # ── Radio buttons ─────────────────────────────────────────────────
         lang_var = tk.StringVar(value=current_lang())
 
-        radio_frame = tk.Frame(dlg, bg=DARK["bg2"])
+        radio_frame = tk.Frame(dlg.body, bg=DARK["bg2"])
         radio_frame.pack(fill="x", padx=20, pady=(10, 4))
 
         flags = {"en": "🇬🇧", "pl": "🇵🇱", "fr": "🇫🇷"}
@@ -408,51 +494,35 @@ class HostsEditor(tk.Tk):
                 indicatoron=True
             ).pack(side="left", padx=4)
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(8, 0))
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(8, 0))
 
         # ── OK button ─────────────────────────────────────────────────────
         def _apply():
             chosen = lang_var.get()
             if chosen != current_lang():
                 set_lang(chosen)
-                self._settings["language"] = chosen
-                save_settings(self._settings)
+                self._save_settings_merged(language=chosen)
                 dlg.destroy()
                 DarkDialog.info(self, T("lang_title"), T("lang_restart_msg"))
             else:
                 dlg.destroy()
 
-        btn_frame = tk.Frame(dlg, bg=DARK["bg2"])
+        btn_frame = tk.Frame(dlg.body, bg=DARK["bg2"])
         btn_frame.pack(pady=14)
         make_btn(btn_frame, "✔", "#80ffb0", "OK", _apply, accent=True).pack()
 
-        # ── Center dialog ─────────────────────────────────────────────────
-        dlg.update_idletasks()
-        w = max(dlg.winfo_reqwidth(), 280)
-        h = max(dlg.winfo_reqheight(), 220)
-        x = self.winfo_x() + (self.winfo_width()  - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.center_on_parent(min_w=280, min_h=220)
 
     def _about(self):
         if self._options_visible:
             self._options_panel.pack_forget()
             self._options_visible = False
 
-        dlg = tk.Toplevel(self)
-        dlg.title("About – HOTS")
-        dlg.configure(bg=DARK["bg"])
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.transient(self)
-        dlg.overrideredirect(False)
-
-        # ── Colored header ────────────────────────────────────────────────
-        hdr = tk.Frame(dlg, bg=DARK["accent"], height=5)
-        hdr.pack(fill="x")
+        dlg = DarkToplevel(self, title="About – HOTS", body_bg=DARK["bg"],
+                            min_width=380, min_height=320)
 
         # ── Logo + title ──────────────────────────────────────────────────
-        top = tk.Frame(dlg, bg=DARK["bg2"])
+        top = tk.Frame(dlg.body, bg=DARK["bg2"])
         top.pack(fill="x")
 
         title_col = tk.Frame(top, bg=DARK["bg2"])
@@ -471,10 +541,10 @@ class HostsEditor(tk.Tk):
                  font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
 
         # ── Separator ──────────────────────────────────────────────────────
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16)
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16)
 
         # ── Description ───────────────────────────────────────────────────
-        desc_frame = tk.Frame(dlg, bg=DARK["bg"])
+        desc_frame = tk.Frame(dlg.body, bg=DARK["bg"])
         desc_frame.pack(fill="x", padx=20, pady=(14, 6))
 
         tk.Label(desc_frame,
@@ -484,9 +554,9 @@ class HostsEditor(tk.Tk):
                  justify="left").pack(anchor="w")
 
         # ── Features ──────────────────────────────────────────────────────
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 4))
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 4))
 
-        features_frame = tk.Frame(dlg, bg=DARK["bg"])
+        features_frame = tk.Frame(dlg.body, bg=DARK["bg"])
         features_frame.pack(fill="x", padx=20, pady=(4, 10))
 
         features = [
@@ -496,6 +566,8 @@ class HostsEditor(tk.Tk):
             ("📋", T("about_feat_raw")),
             ("🔒", T("about_feat_password")),
             ("🌐", T("about_feat_lang")),
+            ("🕵️", T("about_feat_antispy")),
+            ("📤", T("about_feat_export")),
         ]
 
         col_left  = tk.Frame(features_frame, bg=DARK["bg"])
@@ -513,10 +585,10 @@ class HostsEditor(tk.Tk):
                      font=("Segoe UI", 9)).pack(side="left")
 
         # ── Separator ──────────────────────────────────────────────────────
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(4, 0))
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(4, 0))
 
         # ── Footer: author + OK button ────────────────────────────────────
-        footer = tk.Frame(dlg, bg=DARK["bg2"])
+        footer = tk.Frame(dlg.body, bg=DARK["bg2"])
         footer.pack(fill="x")
 
         tk.Label(footer,
@@ -527,13 +599,7 @@ class HostsEditor(tk.Tk):
         ok_btn = make_btn(footer, "✔", "#60c8ff", T("about_close"), dlg.destroy, accent=False)
         ok_btn.pack(side="right", padx=12, pady=8)
 
-        # ── Center dialog ────────────────────────────────────────────────
-        dlg.update_idletasks()
-        w = max(dlg.winfo_reqwidth(), 380)
-        h = max(dlg.winfo_reqheight(), 320)
-        x = self.winfo_x() + (self.winfo_width()  - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.center_on_parent(min_w=380, min_h=320)
 
     def _toggle_raw_view(self):
         if self._options_visible:
@@ -706,6 +772,13 @@ class HostsEditor(tk.Tk):
             self.tree.selection_set(row)
         self.menu.post(event.x_root, event.y_root)
 
+    def _on_tree_click(self, event):
+        """Clears the selection when clicking on empty space below/around the rows."""
+        region = self.tree.identify_region(event.x, event.y)
+        row    = self.tree.identify_row(event.y)
+        if region in ("nothing", "") or not row:
+            self.tree.selection_remove(*self.tree.selection())
+
     def _set_zero_ip(self):
         indices = self._selected_indices()
         if not indices:
@@ -778,11 +851,7 @@ class HostsEditor(tk.Tk):
 
         for i, e in visible:
             tag   = "on" if e["enabled"] else "off"
-            label = "✔ active" if e["enabled"] else "✘ disabled"
-            if current_lang() == "pl":
-                label = "✔ aktywny" if e["enabled"] else "✘ wyłączony"
-            elif current_lang() == "fr":
-                label = "✔ actif" if e["enabled"] else "✘ désactivé"
+            label = T("status_active") if e["enabled"] else T("status_disabled")
             self.tree.insert("", "end", iid=str(i), values=(label, e["ip"], e["hostname"], e["comment"]), tags=(tag,))
 
         shown = len(visible)
@@ -911,8 +980,8 @@ class HostsEditor(tk.Tk):
 
             def bg_save_worker():
                 try:
-                    dns_ok = save_hosts(HOSTS_PATH, self.entries)
-                    self.after(0, lambda: save_success(dns_ok))
+                    save_hosts(HOSTS_PATH, self.entries)
+                    self.after(0, save_success)
                 except PermissionError:
                     self.after(0, save_permission_error)
                 except Exception as ex:
@@ -920,10 +989,9 @@ class HostsEditor(tk.Tk):
                 finally:
                     self.after(0, self._update_status)
 
-            def save_success(dns_ok):
+            def save_success():
                 self._mark_clean()
-                dns_line = T("save_dns_ok") if dns_ok else T("save_dns_slow")
-                DarkDialog.info(self, T("save_success_title"), T("save_success_msg", dns_line=dns_line))
+                DarkDialog.info(self, T("save_success_title"), T("save_success_msg"))
 
             def save_permission_error():
                 DarkDialog.error(self, T("save_perm_title"), T("save_perm_msg"))
@@ -946,23 +1014,17 @@ class HostsEditor(tk.Tk):
         is_selection      = bool(selected_indices)
 
         # ── Export options dialog ─────────────────────────────────────────
-        dlg = tk.Toplevel(self)
-        dlg.title(T("btn_export"))
-        dlg.configure(bg=DARK["bg2"])
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.transient(self)
+        dlg = DarkToplevel(self, title=T("btn_export"), body_bg=DARK["bg2"],
+                            min_width=320, min_height=220)
 
-        tk.Frame(dlg, bg=DARK["accent"], height=4).pack(fill="x")
-
-        tk.Label(dlg, text="📤  " + T("btn_export"),
+        tk.Label(dlg.body, text="📤  " + T("btn_export"),
                  bg=DARK["bg2"], fg=DARK["fg"],
                  font=("Segoe UI", 11, "bold")).pack(pady=(16, 6), padx=24, anchor="w")
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16)
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16)
 
         # ── Export scope ──────────────────────────────────────────────────
-        scope_frame = tk.Frame(dlg, bg=DARK["bg2"])
+        scope_frame = tk.Frame(dlg.body, bg=DARK["bg2"])
         scope_frame.pack(fill="x", padx=20, pady=(12, 4))
 
         tk.Label(scope_frame, text=T("export_scope_label"),
@@ -995,10 +1057,10 @@ class HostsEditor(tk.Tk):
         )
         rb_sel.pack(anchor="w", pady=1)
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 0))
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 0))
 
         # ── Comments option ───────────────────────────────────────────────
-        comment_frame = tk.Frame(dlg, bg=DARK["bg2"])
+        comment_frame = tk.Frame(dlg.body, bg=DARK["bg2"])
         comment_frame.pack(fill="x", padx=20, pady=(10, 4))
 
         tk.Label(comment_frame, text=T("export_comments_label"),
@@ -1016,10 +1078,10 @@ class HostsEditor(tk.Tk):
             font=("Segoe UI", 10), cursor="hand2"
         ).pack(anchor="w", pady=(4, 0))
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 0))
+        tk.Frame(dlg.body, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 0))
 
         # ── Buttons ───────────────────────────────────────────────────────
-        btn_frame = tk.Frame(dlg, bg=DARK["bg2"])
+        btn_frame = tk.Frame(dlg.body, bg=DARK["bg2"])
         btn_frame.pack(pady=14)
 
         confirmed = [False]
@@ -1034,12 +1096,7 @@ class HostsEditor(tk.Tk):
         dlg.bind("<Return>", lambda _: _do_export())
         dlg.bind("<Escape>", lambda _: dlg.destroy())
 
-        dlg.update_idletasks()
-        w = max(dlg.winfo_reqwidth(), 320)
-        h = max(dlg.winfo_reqheight(), 220)
-        x = self.winfo_x() + (self.winfo_width()  - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        dlg.center_on_parent(min_w=320, min_h=220)
 
         dlg.wait_window()
 
@@ -1146,10 +1203,10 @@ class HostsEditor(tk.Tk):
     def _restore_default(self):
         if not DarkDialog.ask(self, T("restore_ask_title"), T("restore_ask_msg")): return
 
-        # Default entries — without the historical header boilerplate
+        # Default entries — exact match of Microsoft's original hosts file template
         default_entries = [
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
-             "raw": "# Copyright (c) 1993-2014 Microsoft Corp."},
+             "raw": "# Copyright (c) 1993-2009 Microsoft Corp."},
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
              "raw": "#"},
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
@@ -1157,9 +1214,37 @@ class HostsEditor(tk.Tk):
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
              "raw": "#"},
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# This file contains the mappings of IP addresses to host names. Each"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# entry should be kept on an individual line. The IP address should"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# be placed in the first column followed by the corresponding host name."},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# The IP address and the host name should be separated by at least one"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# space."},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# Additionally, comments (such as these) may be inserted on individual"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# lines or following the machine name denoted by a '#' symbol."},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# For example:"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#      102.54.94.97     rhino.acme.com          # source server"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#       38.25.63.10     x.acme.com              # x client host"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": ""},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
              "raw": "# localhost name resolution is handled within DNS itself."},
-            {"enabled": True,  "ip": "127.0.0.1", "hostname": "localhost", "comment": "", "raw": ""},
-            {"enabled": True,  "ip": "::1",        "hostname": "localhost", "comment": "", "raw": ""},
+            {"enabled": False, "ip": "127.0.0.1", "hostname": "localhost", "comment": "", "raw": ""},
+            {"enabled": False, "ip": "::1",        "hostname": "localhost", "comment": "", "raw": ""},
         ]
 
         try:
@@ -1171,5 +1256,4 @@ class HostsEditor(tk.Tk):
             return
 
         self._load()
-        dns_line = T("save_dns_ok") if dns_ok else T("save_dns_slow")
-        DarkDialog.info(self, T("restore_done_title"), T("restore_done_msg") + f"\n{dns_line}")
+        DarkDialog.info(self, T("restore_done_title"), T("restore_done_msg"))

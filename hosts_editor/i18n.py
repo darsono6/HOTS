@@ -35,7 +35,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "btn_default":     {"en": "Default hosts",     "pl": "Domyślny hosts",       "fr": "Hosts par défaut"},
     "btn_check_dom":   {"en": "Check domains",     "pl": "Sprawdź domeny",       "fr": "Vérifier domaines"},
     "btn_malware":     {"en": "Scan malware",      "pl": "Szukaj malware",       "fr": "Scanner malware"},
-    "btn_parental":    {"en": "Parental Control",  "pl": "Ochrona Rodzicielska", "fr": "Contrôle parental"},
+    "btn_parental":    {"en": "Parental Control  ","pl": "Ochrona Rodzicielska", "fr": "Contrôle parental"},
     "btn_options":     {"en": "Options",           "pl": "Opcje",                "fr": "Options"},
 
     # ── Options panel ──────────────────────────────────────────────────────
@@ -45,14 +45,16 @@ _STRINGS: dict[str, dict[str, str]] = {
     "opt_language":    {"en": "Language",          "pl": "Język",                "fr": "Langue"},
 
     # ── Password option (dynamic label) ───────────────────────────────────
-    "opt_pass_on":     {"en": "Password: ON 🟢",   "pl": "Hasło: WŁ 🟢",         "fr": "Mot de passe: ACT 🟢"},
-    "opt_pass_off":    {"en": "Set Password",      "pl": "Ustaw Hasło",          "fr": "Définir mot de passe"},
+    "opt_pass_on":     {"en": "Password: ON",    "pl": "Hasło: WŁ",           "fr": "Passe: ACT"},
+    "opt_pass_off":    {"en": "Set Password",   "pl": "Ustaw Hasło",          "fr": "Mot de passe"},
 
     # ── Table columns ──────────────────────────────────────────────────────
-    "col_status":   {"en": "Status",   "pl": "Status",    "fr": "Statut"},
-    "col_ip":       {"en": "IP Address","pl": "Adres IP", "fr": "Adresse IP"},
-    "col_hostname": {"en": "Hostname", "pl": "Hostname",  "fr": "Nom d'hôte"},
-    "col_comment":  {"en": "Comment",  "pl": "Komentarz", "fr": "Commentaire"},
+    "col_status":      {"en": "Status",      "pl": "Status",      "fr": "Statut"},
+    "col_ip":          {"en": "IP Address",  "pl": "Adres IP",    "fr": "Adresse IP"},
+    "col_hostname":    {"en": "Hostname",    "pl": "Hostname",    "fr": "Nom d'hôte"},
+    "col_comment":     {"en": "Comment",     "pl": "Komentarz",   "fr": "Commentaire"},
+    "status_active":   {"en": "✔ active",   "pl": "✔ aktywny",  "fr": "✔ actif"},
+    "status_disabled": {"en": "✘ disabled", "pl": "✘ wyłączony", "fr": "✘ désactivé"},
 
     # ── Status / search bar ────────────────────────────────────────────────
     "status_entries":   {"en": "Entries: {total}  |  Active: {active}  |  Disabled: {disabled}",
@@ -88,9 +90,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "about_subtitle":      {"en": "Hosts File Editor",
                             "pl": "Edytor pliku hosts",
                             "fr": "Éditeur de fichier hosts"},
-    "about_version":       {"en": "version 1.0",
-                            "pl": "wersja 1.0",
-                            "fr": "version 1.0"},
+    "about_version":       {"en": "version 1.1",
+                            "pl": "wersja 1.1",
+                            "fr": "version 1.1"},
     "about_desc":          {"en": "Advanced Windows hosts file editor\nwith dark theme, diagnostics and parental control.",
                             "pl": "Zaawansowany edytor pliku hosts systemu Windows\nz ciemnym motywem, diagnostyką i ochroną rodzicielską.",
                             "fr": "Éditeur avancé du fichier hosts Windows\navec thème sombre, diagnostics et contrôle parental."},
@@ -112,6 +114,12 @@ _STRINGS: dict[str, dict[str, str]] = {
     "about_feat_lang":     {"en": "Multilingual interface",
                             "pl": "Wielojęzyczny interfejs",
                             "fr": "Interface multilingue"},
+    "about_feat_antispy":  {"en": "Windows AntiSpy",
+                            "pl": "Windows AntiSpy",
+                            "fr": "Windows AntiSpy"},
+    "about_feat_export":   {"en": "Export to file",
+                            "pl": "Eksport do pliku",
+                            "fr": "Export vers un fichier"},
     "about_footer":        {"en": "© 2026 Darsono  •  All rights reserved",
                             "pl": "© 2026 Darsono  •  Wszelkie prawa zastrzeżone",
                             "fr": "© 2026 Darsono  •  Tous droits réservés"},
@@ -121,9 +129,9 @@ _STRINGS: dict[str, dict[str, str]] = {
 
     # ── Save dialogs ───────────────────────────────────────────────────────
     "save_success_title":  {"en": "Success",             "pl": "Sukces",                 "fr": "Succès"},
-    "save_success_msg":    {"en": "Hosts file saved successfully!\nBackup created automatically.\n\n{dns_line}",
-                            "pl": "Plik hosts został pomyślnie zapisany!\nKopia zapasowa utworzona automatycznie.\n\n{dns_line}",
-                            "fr": "Fichier hosts enregistré avec succès!\nSauvegarde créée automatiquement.\n\n{dns_line}"},
+    "save_success_msg":    {"en": "Hosts file saved successfully!\nBackup created automatically.",
+                            "pl": "Plik hosts został pomyślnie zapisany!\nKopia zapasowa utworzona automatycznie.",
+                            "fr": "Fichier hosts enregistré avec succès!\nSauvegarde créée automatiquement."},
     "save_dns_ok":         {"en": "The Windows 'DNS Client' service successfully processed the structure and released the file handle.",
                             "pl": "Systemowa usługa 'Klient DNS' pomyślnie przetworzyła strukturę i zwolniła uchwyt pliku.",
                             "fr": "Le service Windows 'Client DNS' a traité la structure avec succès et libéré le descripteur de fichier."},
@@ -315,6 +323,15 @@ _STRINGS: dict[str, dict[str, str]] = {
     "bak_del_ask_many":  {"en": "Permanently delete {n} selected backups?\n\n{names}",
                           "pl": "Trwale usunąć {n} zaznaczone kopie?\n\n{names}",
                           "fr": "Supprimer définitivement {n} sauvegardes sélectionnées?\n\n{names}"},
+    "bak_status_count":    {"en": "Found {n} backup(s).",
+                            "pl": "Znaleziono {n} kopii zapasowych.",
+                            "fr": "{n} sauvegarde(s) trouvée(s)."},
+    "bak_status_restored": {"en": "Restored backup: {name}",
+                            "pl": "Przywrócono kopię: {name}",
+                            "fr": "Sauvegarde restaurée : {name}"},
+    "bak_status_deleted":  {"en": "Deleted {n} backup(s).",
+                            "pl": "Usunięto {n} kopii zapasowych.",
+                            "fr": "{n} sauvegarde(s) supprimée(s)."},
     # DIFF DIALOG
     "diff_title":        {"en": "Preview changes before saving", "pl": "Podgląd zmian przed zapisem",     "fr": "Aperçu des modifications avant enregistrement"},
     "diff_header":       {"en": "Preview changes",               "pl": "Podgląd zmian",                   "fr": "Aperçu des modifications"},
@@ -518,7 +535,40 @@ _STRINGS: dict[str, dict[str, str]] = {
     "par_cat_tiktok":       {"en": "Block TikTok",                "pl": "Blokada TikTok",                   "fr": "Bloquer TikTok"},
     "par_cat_twitch":       {"en": "Block Twitch",                "pl": "Blokada Twitch",                   "fr": "Bloquer Twitch"},
     "par_cat_snapchat":     {"en": "Block Snapchat",              "pl": "Blokada Snapchat",                 "fr": "Bloquer Snapchat"},
+    "par_btn_working":       {"en": "Working…",                   "pl": "Przetwarzanie…",                   "fr": "Traitement…"},
+    "par_antispy_err_title": {"en": "AntiSpy Error",
+                             "pl": "Błąd AntiSpy",
+                             "fr": "Erreur AntiSpy"},
+    "par_antispy_err_msg":  {"en": "Could not apply system protection changes (services / registry / firewall).\nMake sure HOTS is running as Administrator.",
+                             "pl": "Nie udało się zastosować zmian systemowych (usługi / rejestr / zapora).\nUpewnij się, że HOTS jest uruchomiony jako Administrator.",
+                             "fr": "Impossible d'appliquer les modifications système (services / registre / pare-feu).\nAssurez-vous que HOTS est exécuté en tant qu'administrateur."},
     "par_cat_antispy":      {"en": "Windows AntiSpy",             "pl": "Windows AntiSpy",                  "fr": "Windows AntiSpy"},
+    "par_antispy_tooltip":  {
+        "en": (
+            "Enable:\n"
+            "Disables telemetry services (DiagTrack, dmwappushservice).\n"
+            "Adds a registry entry: AllowTelemetry = 0.\n"
+            "Adds outbound block rules in Windows Firewall (CompatTelRunner.exe, devicecensus.exe, WerFault.exe).\n\n"
+            "Disable:\n"
+            "Restores the exact state of the services, registry, and firewall that existed on the computer immediately before Windows AntiSpy protection was activated."
+        ),
+        "pl": (
+            "Włączenie:\n"
+            "Wyłącza usługi telemetrii (DiagTrack, dmwappushservice).\n"
+            "Dodaje wpis w rejestrze: AllowTelemetry = 0.\n"
+            "Dodaje reguły blokady wychodzącej w Windows Firewall (CompatTelRunner.exe, devicecensus.exe, WerFault.exe).\n\n"
+            "Wyłączenie:\n"
+            "Przywraca dokładny stan usług, rejestru oraz zapory, jaki znajdował się na komputerze bezpośrednio przed aktywacją ochrony Windows AntiSpy."
+        ),
+        "fr": (
+            "Activation :\n"
+            "Désactive les services de télémétrie (DiagTrack, dmwappushservice).\n"
+            "Ajoute une entrée de registre : AllowTelemetry = 0.\n"
+            "Ajoute des règles de blocage sortant dans le Pare-feu Windows (CompatTelRunner.exe, devicecensus.exe, WerFault.exe).\n\n"
+            "Désactivation :\n"
+            "Restaure l'état exact des services, du registre et du pare-feu tel qu'il était sur l'ordinateur immédiatement avant l'activation de la protection Windows AntiSpy."
+        ),
+    },
     "par_cat_torrent":      {"en": "Block Torrent",               "pl": "Blokada Torrent",                  "fr": "Bloquer Torrent"},
     "par_cat_pinterest":    {"en": "Block Pinterest",             "pl": "Blokada Pinterest",                "fr": "Bloquer Pinterest"},
     "par_cat_reddit":       {"en": "Block Reddit",                "pl": "Blokada Reddit",                   "fr": "Bloquer Reddit"},
@@ -626,40 +676,48 @@ _STRINGS: dict[str, dict[str, str]] = {
     "par_cf_btn_enable": {"en": "Enable",   "pl": "Włącz",    "fr": "Activer"},
     "par_cf_btn_disable":{"en": "Disable",  "pl": "Wyłącz",   "fr": "Désactiver"},
 
-    "par_cf_on_ok": {
+    "par_cf_tooltip": {
         "en": (
-            "✅ Cloudflare Family DNS has been enabled.\n\n"
-            "All DNS queries on this computer are now routed through\n"
-            "Cloudflare's servers (1.1.1.3 / 1.0.0.3), which automatically\n"
-            "block adult content — regardless of the browser or application used.\n\n"
-            "⚠ Note: This protection works at the network level, not in the\n"
-            "hosts file. It covers all programs, not just the browser.\n\n"
-            "The 'Block XXX Sites' filter (hosts-based) has been disabled\n"
-            "because Cloudflare DNS already provides broader coverage."
+            "Cloudflare Family DNS (1.1.1.3 / 1.0.0.3) blocks adult content "
+            "and known malware/phishing domains at the network level — it "
+            "works for every program and browser on this computer, not "
+            "just hosts-file entries.\n\n"
+            "Enabling it changes the DNS servers on the active network "
+            "interfaces. The hosts-based 'Block XXX Sites' filter is then "
+            "disabled, since this protection already covers more ground.\n\n"
+            "Disabling it restores the DNS settings that were in place on "
+            "this computer before the change was made."
         ),
         "pl": (
-            "✅ Cloudflare Family DNS został włączony.\n\n"
-            "Wszystkie zapytania DNS na tym komputerze są teraz kierowane\n"
-            "przez serwery Cloudflare (1.1.1.3 / 1.0.0.3), które automatycznie\n"
-            "blokują treści dla dorosłych — niezależnie od używanej przeglądarki\n"
-            "czy aplikacji.\n\n"
-            "⚠ Uwaga: Ta ochrona działa na poziomie sieci, nie w pliku hosts.\n"
-            "Obejmuje wszystkie programy, nie tylko przeglądarkę.\n\n"
-            "Filtr 'Blokada stron XXX' (oparty na hosts) został wyłączony,\n"
-            "ponieważ Cloudflare DNS zapewnia już szerszą ochronę."
+            "Cloudflare Family DNS (1.1.1.3 / 1.0.0.3) blokuje treści dla "
+            "dorosłych oraz znane domeny malware/phishingowe na poziomie "
+            "sieci — działa dla wszystkich programów i przeglądarek na tym "
+            "komputerze, nie tylko dla wpisów w pliku hosts.\n\n"
+            "Włączenie zmienia serwery DNS na aktywnych kartach sieciowych. "
+            "Filtr 'Blokada stron XXX' oparty na hosts zostaje wtedy "
+            "wyłączony, ponieważ ta ochrona zapewnia już szerszy zasięg.\n\n"
+            "Wyłączenie przywraca ustawienia DNS, jakie obowiązywały na tym "
+            "komputerze przed wprowadzeniem zmiany."
         ),
         "fr": (
-            "✅ Cloudflare Family DNS a été activé.\n\n"
-            "Toutes les requêtes DNS sur cet ordinateur sont maintenant acheminées\n"
-            "via les serveurs Cloudflare (1.1.1.3 / 1.0.0.3), qui bloquent\n"
-            "automatiquement les contenus adultes — quel que soit le navigateur\n"
-            "ou l'application utilisé.\n\n"
-            "⚠ Remarque: Cette protection fonctionne au niveau réseau, pas dans\n"
-            "le fichier hosts. Elle couvre tous les programmes, pas seulement\n"
-            "le navigateur.\n\n"
-            "Le filtre 'Blocage sites XXX' (basé sur hosts) a été désactivé,\n"
-            "car Cloudflare DNS offre déjà une couverture plus large."
+            "Cloudflare Family DNS (1.1.1.3 / 1.0.0.3) bloque les contenus "
+            "adultes et les domaines connus de malware/phishing au niveau "
+            "réseau — il fonctionne pour tous les programmes et navigateurs "
+            "sur cet ordinateur, pas seulement pour les entrées du fichier "
+            "hosts.\n\n"
+            "Son activation modifie les serveurs DNS sur les interfaces "
+            "réseau actives. Le filtre 'Blocage sites XXX' basé sur hosts "
+            "est alors désactivé, car cette protection offre déjà une "
+            "couverture plus large.\n\n"
+            "Sa désactivation restaure les paramètres DNS qui étaient en "
+            "place sur cet ordinateur avant la modification."
         ),
+    },
+
+    "par_cf_on_ok": {
+        "en": "✅ XXX Block · Cloudflare DNS has been enabled.",
+        "pl": "✅ Blokada XXX · Cloudflare DNS została włączona.",
+        "fr": "✅ Blocage XXX · Cloudflare DNS a été activé.",
     },
 
     "par_cf_off_ok": {

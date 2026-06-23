@@ -8,21 +8,19 @@ import tkinter as tk
 from tkinter import ttk
 
 from ..constants import DARK
-from ..widgets import make_btn, center_on_parent
+from ..widgets import make_btn, DarkToplevel
 from ..i18n import T
 
 
-class DiffDialog(tk.Toplevel):
+class DiffDialog(DarkToplevel):
     """Shows the differences between the current file and the new version before saving."""
 
     def __init__(self, parent, old_text: str, new_text: str, on_confirm):
-        super().__init__(parent)
-        self.title(T("diff_title"))
-        self.configure(bg=DARK["bg"])
-        self.resizable(True, True)
+        super().__init__(parent, title=T("diff_title"), body_bg=DARK["bg"],
+                          resizable=True, min_width=860, min_height=500)
         self.on_confirm = on_confirm
 
-        hdr = tk.Frame(self, bg=DARK["bg2"],
+        hdr = tk.Frame(self.body, bg=DARK["bg2"],
                        highlightthickness=1, highlightbackground=DARK["border"])
         hdr.pack(fill="x")
         tk.Label(hdr, text=T("diff_header"), bg=DARK["bg2"], fg=DARK["fg"],
@@ -32,7 +30,7 @@ class DiffDialog(tk.Toplevel):
             tk.Label(hdr, text=T(key), bg=DARK["bg2"], fg=color,
                      font=("Segoe UI", 9)).pack(side="left")
 
-        txt_frame = tk.Frame(self, bg=DARK["bg"])
+        txt_frame = tk.Frame(self.body, bg=DARK["bg"])
         txt_frame.pack(fill="both", expand=True, padx=8, pady=(6, 0))
 
         self.text = tk.Text(
@@ -91,9 +89,7 @@ class DiffDialog(tk.Toplevel):
         make_btn(hdr, "✖", "#e05050", T("diff_cancel"),
                  self.destroy).pack(side="right", padx=3, pady=4)
 
-        self.transient(parent)
-        self.grab_set()
-        center_on_parent(self, parent, min_w=860, min_h=500)
+        self.center_on_parent(min_w=860, min_h=500)
 
     def _fill_diff(self, old: str, new: str):
         old_lines = old.splitlines(keepends=True)

@@ -9,7 +9,7 @@ import tkinter as tk
 import webbrowser
 
 from ..constants import DARK
-from ..widgets import make_btn, DarkDialog, center_on_parent
+from ..widgets import make_btn, DarkDialog, DarkToplevel
 from ..i18n import T
 
 PAYPAL_LINK   = "https://paypal.me/darsonodark"
@@ -23,18 +23,14 @@ def _banner_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "banner.png")
 
 
-class SupportDialog(tk.Toplevel):
+class SupportDialog(DarkToplevel):
     def __init__(self, parent):
-        super().__init__(parent)
-        self.title(T("sup_title"))
-        self.configure(bg=DARK["bg"])
-        self.resizable(False, False)
+        super().__init__(parent, title=T("sup_title"), body_bg=DARK["bg"],
+                          min_width=480, min_height=380)
 
         self._build_ui()
 
-        self.transient(parent)
-        self.grab_set()
-        center_on_parent(self, parent, min_w=480, min_h=380)
+        self.center_on_parent(min_w=480, min_h=380)
         self.wait_window()
 
     def _build_ui(self):
@@ -42,7 +38,7 @@ class SupportDialog(tk.Toplevel):
         BANNER_W = 480
         BANNER_H = 180
 
-        banner_frame = tk.Frame(self, bg=DARK["bg"], width=BANNER_W, height=BANNER_H)
+        banner_frame = tk.Frame(self.body, bg=DARK["bg"], width=BANNER_W, height=BANNER_H)
         banner_frame.pack(fill="x")
         banner_frame.pack_propagate(False)
 
@@ -61,7 +57,7 @@ class SupportDialog(tk.Toplevel):
                      font=("Segoe UI", 32, "bold")).pack(expand=True)
 
         # ── Content ──────────────────────────────────────────────────────
-        body = tk.Frame(self, bg=DARK["bg"], padx=30, pady=20)
+        body = tk.Frame(self.body, bg=DARK["bg"], padx=30, pady=20)
         body.pack(fill="both", expand=True)
 
         tk.Label(body, text=T("sup_greeting"),
@@ -112,7 +108,7 @@ class SupportDialog(tk.Toplevel):
         email_lbl.bind("<Button-1>", lambda _: self._copy_email())
 
         # ── Footer ───────────────────────────────────────────────────────
-        footer = tk.Frame(self, bg=DARK["bg2"], padx=16, pady=10,
+        footer = tk.Frame(self.body, bg=DARK["bg2"], padx=16, pady=10,
                           highlightthickness=1, highlightbackground=DARK["border"])
         footer.pack(fill="x", side="bottom")
 

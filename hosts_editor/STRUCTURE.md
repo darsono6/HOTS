@@ -21,6 +21,7 @@ HOTS_Project/                      ← Repository Root Directory
     ├── app.py                     ← Main GUI Application window and core UI assembly
     ├── constants.py               ← Centralized dark theme color palette and local I/O paths
     ├── core.py                    ← Pure data logic (Hosts parsing, text serialization, file CRUD)
+    ├── core_antispy.py            ← Windows AntiSpy engine (telemetry services, registry, firewall rules)
     ├── dns_utils.py               ← Active interface lookup and Cloudflare Family DNS orchestration
     ├── widgets.py                 ← Reusable dark-themed widgets, custom titlebar, and dialog buttons
     │

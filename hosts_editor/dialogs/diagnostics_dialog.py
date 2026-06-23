@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from ..constants import DARK
 from ..core import dns_lookup_external
-from ..widgets import make_btn, DarkDialog, center_on_parent
+from ..widgets import make_btn, DarkDialog, DarkToplevel
 from ..i18n import T
 
 
@@ -40,23 +40,20 @@ _UPDATE_DOMAINS: frozenset = frozenset({
 _HOMOGLYPH_CHARS: frozenset = frozenset("\u0430\u0435\u043e\u0440\u0441\u0445\u0456")
 
 
-class DiagnosticsDialog(tk.Toplevel):
+class DiagnosticsDialog(DarkToplevel):
     SYSTEM_DOMAINS  = _SYSTEM_DOMAINS
     UPDATE_DOMAINS  = _UPDATE_DOMAINS
     HOMOGLYPH_CHARS = _HOMOGLYPH_CHARS
 
     def __init__(self, parent, entries, mode="existence", on_remove=None):
-        super().__init__(parent)
+        title_key = "diag_title_existence" if mode == "existence" else "diag_title_malware"
+        super().__init__(parent, title=T(title_key), body_bg=DARK["bg"],
+                          resizable=True, min_width=780, min_height=520)
         self.mode       = mode
         self.entries    = entries
         self._on_remove = on_remove
-        self.configure(bg=DARK["bg"])
-        self.resizable(True, True)
 
-        title_key = "diag_title_existence" if mode == "existence" else "diag_title_malware"
-        self.title(T(title_key))
-
-        hdr = tk.Frame(self, bg=DARK["bg2"],
+        hdr = tk.Frame(self.body, bg=DARK["bg2"],
                        highlightthickness=1, highlightbackground=DARK["border"])
         hdr.pack(fill="x")
         icon = "\U0001f50d" if mode == "existence" else "\U0001f6e1"
@@ -72,7 +69,7 @@ class DiagnosticsDialog(tk.Toplevel):
                                    self._run, accent=True)
         self._start_btn.pack(side="right", padx=10, pady=6)
 
-        pf = tk.Frame(self, bg=DARK["bg"])
+        pf = tk.Frame(self.body, bg=DARK["bg"])
         pf.pack(fill="x", padx=8, pady=(6, 0))
         self._prog_lbl = tk.Label(pf, text=T("diag_click_to_start"),
                                   bg=DARK["bg"], fg=DARK["fg2"], font=("Segoe UI", 9))
@@ -81,7 +78,7 @@ class DiagnosticsDialog(tk.Toplevel):
                                     font=("Segoe UI", 9))
         self._prog_count.pack(side="right")
 
-        tbl = tk.Frame(self, bg=DARK["bg"])
+        tbl = tk.Frame(self.body, bg=DARK["bg"])
         tbl.pack(fill="both", expand=True, padx=8, pady=6)
 
         if mode == "existence":
@@ -108,12 +105,12 @@ class DiagnosticsDialog(tk.Toplevel):
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
 
-        self._status = tk.Label(self, text="", anchor="w", padx=10, pady=3,
+        self._status = tk.Label(self.body, text="", anchor="w", padx=10, pady=3,
                                 bg=DARK["bg2"], fg=DARK["fg2"], font=("Segoe UI", 9),
                                 highlightthickness=1, highlightbackground=DARK["border"])
         self._status.pack(fill="x", side="bottom")
 
-        act_bar = tk.Frame(self, bg=DARK["bg2"],
+        act_bar = tk.Frame(self.body, bg=DARK["bg2"],
                            highlightthickness=1, highlightbackground=DARK["border"])
         act_bar.pack(fill="x", side="bottom")
         if mode == "existence":
@@ -128,9 +125,7 @@ class DiagnosticsDialog(tk.Toplevel):
                  bg=DARK["bg2"], fg=DARK["fg2"],
                  font=("Segoe UI", 8)).pack(side="right", padx=10)
 
-        self.transient(parent)
-        self.grab_set()
-        center_on_parent(self, parent, min_w=780, min_h=520)
+        self.center_on_parent(min_w=780, min_h=520)
 
     def _run(self):
         import threading

@@ -2,7 +2,7 @@
 
 <img src="hosts_editor/assets/banner.png" alt="HOTS Banner" width="600"/>
 
-# HOTS — Windows Hosts File Editor
+# HOTS — Windows Hosts File Editor v1.1
 
 **A powerful, dark-themed desktop application for managing the Windows hosts file.**
 
@@ -10,6 +10,8 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%2864--bit%29-0078D4?logo=windows)](https://github.com/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR-brightgreen)](#-multilingual-support)
+
+### 📥 [⬇️ Download HOTS_setup.exe](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_setup.exe) &nbsp;·&nbsp; [⬇️ Download HOTS.exe (portable)](https://github.com/darsono6/HOTS/releases/latest/download/HOTS.exe)
 
 </div>
 
@@ -92,7 +94,15 @@ Built as a personal hobby project, released free under **GPLv3**.
   - State persists across HOTS sessions — DNS remains protected even after the app is closed
   - Works correctly regardless of Windows UI language (handles both English and Polish `netsh` output)
 
-
+### Windows AntiSpy
+- 🛡 **One-click Windows telemetry blocker** — reduces data sent to Microsoft without third-party tools:
+  - **Disables two telemetry services:** `DiagTrack` (Connected User Experiences and Telemetry) and `dmwappushservice` (WAP Push Message Routing)
+  - **Blocks three system binaries** via Windows Firewall outbound rules: `CompatTelRunner.exe`, `devicecensus.exe`, `WerFault.exe`
+  - **Sets** `AllowTelemetry = 0` in `HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\DataCollection`
+- Before making any changes, the original state of all services and the registry value is saved to `%APPDATA%\HOTS\HOTS_antispy_state.json`
+- **Full restore** — disabling AntiSpy reads the backup and returns every service and registry value to its exact pre-HOTS state
+- Requires Administrator rights (UAC prompt on launch covers this)
+- Intentionally narrow scope — HOTS is not a comprehensive privacy suite; this targets the most impactful telemetry vectors only
 
 ### UI & UX
 - 🌙 **Full dark theme** — custom titlebar, dark dialogs, dark scrollbars
@@ -129,11 +139,21 @@ The hosts file only affects the Windows PC it runs on. Phones, tablets, and any 
 
 ### Option A — Run the `.exe` (recommended)
 
-1. Download the latest `HOTS.exe` from the [**Releases**](../../releases) page
+1. Download `HOTS_setup.exe` (installer) or `HOTS.exe` (portable, no install) from the [**Releases**](../../releases) page
 2. Double-click — UAC will prompt for Administrator rights
-3. Done. No installation required.
+3. Done. No further setup required.
 
 > **System requirements:** Windows 10 or Windows 11, 64-bit. Windows 7/8/8.1 and 32-bit systems are not supported.
+
+#### ⚠️ "Windows protected your PC" / SmartScreen warning
+
+Since HOTS is a small independent project without a paid code-signing certificate, Windows SmartScreen may show a warning like *"this app isn't commonly downloaded"* the first few times it's downloaded. This is expected and does **not** mean the file is unsafe — it simply means Microsoft hasn't yet built up a download reputation for it (this happens to every new, unsigned `.exe`, regardless of safety).
+
+To proceed:
+1. If you see a screen titled **"Windows protected your PC"**, click **More info**, then click **Run anyway**
+2. If you see the Edge/browser download warning shown above, click the **"…"** (more actions) menu next to the downloaded file → **Keep** → **Show more** → **Keep anyway**
+
+If you'd rather verify the file yourself first, you can always build it from source instead — see Option B below — or inspect the full source code in this repository.
 
 ### Option B — Run from source
 
@@ -160,6 +180,7 @@ hosts_editor/
 ├── __main__.py          # Entry point — UAC elevation, password prompt, language init
 ├── app.py               # Main window (HostsEditor)
 ├── core.py              # Data logic — parse, save, import/export, DNS, parental control
+├── core_antispy.py      # Windows AntiSpy engine — services, firewall rules, registry
 ├── constants.py         # Theme colors, paths, settings load/save
 ├── widgets.py           # Reusable UI components — buttons, dark dialogs, titlebar
 ├── dns_utils.py         # DNS management — active interface lookup, Cloudflare Family DNS orchestration
@@ -185,7 +206,7 @@ hosts_editor/
 ## 🌐 Multilingual Support
 
 The interface language can be changed in the **Options → Language** panel.  
-The selected language is saved to `settings.json` and applied on the next launch — including the startup password prompt.
+The selected language is saved to `%APPDATA%\HOTS\settings.json` and applied on the next launch — including the startup password prompt.
 
 | Code | Language |
 |------|----------|
@@ -211,7 +232,6 @@ You use this software **at your own risk**.
 If HOTS saves you time or you simply want to say thanks:
 
 **PayPal:** [paypal.me/darsonodark](https://paypal.me/darsonodark)  
-**Email:** darsono.dark@gmail.com
 
 **Support:** hots.support@gmail.com
 
