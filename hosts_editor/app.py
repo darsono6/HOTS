@@ -1,1117 +1,1590 @@
-"""
-Main application window: toolbar, entry table, search bar.
-To add a new toolbar button or change the window layout, edit this file.
-"""
-
 import os
-import sys
 import re
+import sys
 import copy
+import time
+import ctypes
 import threading
-import tkinter as tk
-from tkinter import ttk
+import difflib
 
-from .constants import DARK, HOSTS_PATH, load_settings, save_settings
-from .i18n      import T, set_lang, current_lang, LANGUAGES
-from .core      import (parse_hosts, save_hosts, entries_to_text,
-                         list_backups, import_hosts_file, export_hosts,
-                         is_valid_ip)
-from .widgets   import apply_dark_style, make_btn, _add_paste_menu, DarkDialog, CustomTitlebar
-from .dialogs   import (EntryDialog, DiffDialog,
-                         BackupManagerDialog, DiagnosticsDialog, ParentalDialog,
-                         SupportDialog, SetPasswordDialog, PasswordPromptDialog)
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
+    QLabel, QFrame, QLineEdit, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView, QScrollArea, QSizePolicy,
+    QTextEdit, QMenu, QApplication, QFileDialog, QStyledItemDelegate,
+)
+from PySide6.QtCore import (
+    Qt, QThread, Signal, QTimer, QPoint, QSize, QRect, QObject, QProcess,
+)
+from PySide6.QtGui import (
+    QColor, QFont, QIcon, QPixmap, QAction, QSyntaxHighlighter, QTextCharFormat, QPalette,
+    QCursor, QGuiApplication,
+)
+
+from qfluentwidgets import (
+    FluentWindow, NavigationItemPosition, FluentIcon,
+    PushButton, ToolButton, SearchLineEdit, BodyLabel, TitleLabel,
+    SubtitleLabel, CaptionLabel, CardWidget, ScrollArea,
+    ToggleButton, SwitchButton, InfoBar, InfoBarIcon, InfoBarPosition,
+    MessageBox, Dialog, StateToolTip, ProgressBar, Flyout,
+    FlyoutViewBase, setTheme, Theme, setThemeColor,
+    TransparentPushButton,
+)
+from qfluentwidgets import FluentIcon as FIF
+try:
+    from qfluentwidgets import IndeterminateProgressRing
+except ImportError:
+    IndeterminateProgressRing = None
+
+from .constants import DARK, HOSTS_PATH, IS_LIGHT_THEME, accent_rgba, load_settings, save_settings
+from .i18n import T, set_lang, current_lang, LANGUAGES
+from .core import (
+    parse_hosts, save_hosts, entries_to_text, list_backups,
+    import_from_path, export_to_path, is_valid_ip, MAX_ACTIVE_ENTRIES,
+)
+from .widgets_qt import (
+    HOTSButton, HOTSDialog, apply_global_style, h_separator,
+    v_separator, enable_acrylic, enable_rounded_corners,
+    HOTSContextMenu, attach_line_edit_context_menu, attach_text_edit_context_menu,
+)
 
 
-class HostsEditor(tk.Tk):
-    def __init__(self):
+_ACCENT_GOLD = QColor(DARK["accent"])
+
+_EXTERNAL_ACTIVATE_EVENT_NAME = "Global\\HOTS_HostsEditor_ActivateEvent"
+
+
+def _low_integrity_security_attributes():
+    try:
+        class SECURITY_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [
+                ("nLength", ctypes.c_ulong),
+                ("lpSecurityDescriptor", ctypes.c_void_p),
+                ("bInheritHandle", ctypes.c_int),
+            ]
+
+        sddl = "D:(A;;GA;;;WD)S:(ML;;NW;;;LW)"
+        p_sd = ctypes.c_void_p()
+        ok = ctypes.windll.advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            ctypes.c_wchar_p(sddl), 1, ctypes.byref(p_sd), None
+        )
+        if not ok or not p_sd:
+            return None
+
+        sa = SECURITY_ATTRIBUTES()
+        sa.nLength = ctypes.sizeof(SECURITY_ATTRIBUTES)
+        sa.lpSecurityDescriptor = p_sd
+        sa.bInheritHandle = False
+        return sa
+    except Exception:
+        return None
+
+
+def _parse_saved_geometry(geo_str: str):
+    m = re.match(r"^(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?$", geo_str or "")
+    if not m:
+        return 900, 580, None, None
+    w, h = int(m.group(1)), int(m.group(2))
+    if m.group(3) is None:
+        return w, h, None, None
+    return w, h, int(m.group(3)), int(m.group(4))
+
+
+def _geometry_fits_on_screen(x: int, y: int, w: int, h: int) -> bool:
+    win_rect = QRect(x, y, w, h)
+    return any(win_rect.intersects(screen.availableGeometry())
+               for screen in QApplication.screens())
+
+
+def _centered_position(w: int, h: int):
+    screen = QGuiApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+    if screen is None:
+        return None, None
+    geo = screen.availableGeometry()
+    x = geo.x() + (geo.width() - w) // 2
+    y = geo.y() + (geo.height() - h) // 2
+    return x, y
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+    def mousePressEvent(self, event):
+        from PySide6.QtCore import Qt
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class SaveWorker(QThread):
+    finished  = Signal(bool)
+    error_msg = Signal(str)
+
+    def __init__(self, hosts_path, entries):
+        super().__init__()
+        self._path    = hosts_path
+        self._entries = entries
+
+    def run(self):
+        try:
+            save_hosts(self._path, self._entries)
+            self.finished.emit(True)
+        except PermissionError:
+            self.error_msg.emit(T("save_perm_msg"))
+        except Exception as ex:
+            self.error_msg.emit(str(ex))
+
+
+class _HostsHighlighter(QSyntaxHighlighter):
+    def __init__(self, doc):
+        super().__init__(doc)
+        self._fmt_comment = QTextCharFormat()
+        self._fmt_comment.setForeground(QColor(DARK["fg2"]))
+        self._fmt_active  = QTextCharFormat()
+        self._fmt_active.setForeground(QColor(DARK["green"]))
+
+    def highlightBlock(self, text: str):
+        stripped = text.strip()
+        if not stripped:
+            return
+        if stripped.startswith("#"):
+            self.setFormat(0, len(text), self._fmt_comment)
+        else:
+            self.setFormat(0, len(text), self._fmt_active)
+
+
+class _SortHeaderItem(QTableWidgetItem):
+    def __init__(self, text: str, active: bool = False):
+        super().__init__(text)
+        if active:
+            self.setForeground(QColor(DARK["accent"]))
+        else:
+            self.setForeground(QColor(DARK["fg2"]))
+
+
+def _sort_px(up: bool) -> QPixmap:
+    from PySide6.QtGui import QPainter, QPainterPath
+    sz = 9
+    px = QPixmap(sz, sz)
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setBrush(QColor(DARK["accent"]))
+    p.setPen(Qt.NoPen)
+    path = QPainterPath()
+    if up:
+        path.moveTo(sz / 2, 1)
+        path.lineTo(sz - 1, sz - 1)
+        path.lineTo(1,      sz - 1)
+    else:
+        path.moveTo(1,      1)
+        path.lineTo(sz - 1, 1)
+        path.lineTo(sz / 2, sz - 1)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.end()
+    return px
+
+
+class _NoFocusDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        from PySide6.QtWidgets import QStyle
+        option.state &= ~QStyle.State_HasFocus
+        super().paint(painter, option, index)
+
+
+class _AntiSpyReapplySignals(QObject):
+    done = Signal(dict)
+
+
+class _AntiSpyWatchdogSignals(QObject):
+    done = Signal(list, list)
+
+
+class _ExternalActivateSignals(QObject):
+    activate = Signal()
+
+
+class HostsEditor(FluentWindow):
+    def __init__(self, on_before_show=None):
         super().__init__()
 
-        # ── Custom titlebar (hides the system title bar) ──────────────────
-        self.overrideredirect(True)
-        self.configure(bg=DARK["bg"])
-        apply_dark_style(self)
-
-        # Override hover behavior for all scrollbars (accent color instead of white)
-        style = ttk.Style()
-        style.map("TScrollbar",
-                  background=[("active", DARK["accent"]), ("pressed", DARK["accent"])],
-                  thumb=[("active", DARK["accent"]), ("pressed", DARK["accent"])])
-
-        self.entries   = []
         self._settings = load_settings()
-
-        # ── UI language ─────────────────────────────────────────────────────
         set_lang(self._settings.get("language", "en"))
+        self.entries: list = []
+        self._dirty  = False
+        self._raw_mode = False
+        self._bg_signal_objs: list = []
 
-        # Fit geometry to screen — guard against off-screen placement
-        self._saved_geo = self._settings.get("geometry", "")
-        self.geometry(self._safe_geometry(self._saved_geo))
-        self.minsize(660, 420)
-        self._resize_start = None
 
-        # ── Logo loading (supports PyInstaller .exe and relative paths) ────
-        self._logo_img = None
-        
-        logo_path = self._settings.get("logo_path", "")
-        
-        if not logo_path or not os.path.exists(logo_path):
-            if hasattr(sys, '_MEIPASS'):
-                logo_path = os.path.join(sys._MEIPASS, "logo.png")
-            else:
-                logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
-                if not os.path.exists(logo_path):
-                    logo_path = os.path.join(os.path.abspath("."), "logo.png")
+        self._page_route_map: dict = {}
+
+        self._options_nav_widgets: set = set()
+        self._options_click_guard_ts = 0.0
+        self._options_click_guard_ms = 350
+
+        setTheme(Theme.LIGHT if IS_LIGHT_THEME else Theme.DARK)
+        setThemeColor(_ACCENT_GOLD)
+
+        self.setWindowTitle("HOTS Hosts")
+        w, h, x, y = _parse_saved_geometry(self._settings.get("geometry", ""))
+        self.resize(w, h)
+        if x is not None and y is not None and _geometry_fits_on_screen(x, y, w, h):
+            self.move(x, y)
+        else:
+            cx, cy = _centered_position(w, h)
+            if cx is not None and cy is not None:
+                self.move(cx, cy)
+        self.setMinimumSize(900, 640)
+
+        _ico = self._find_asset("logo.ico")
+        if _ico:
+            self.setWindowIcon(QIcon(_ico))
+
+        _logo_top = self._find_asset("logoS.png")
+
+        self._build_navigation()
+        self.navigationInterface.setExpandWidth(200)
+        self._build_main_view()
+        self._build_backup_page()
+
+        self._load()
 
         try:
-            if os.path.exists(logo_path):
-                from PIL import Image, ImageTk
-                img = Image.open(logo_path).convert("RGBA")
-                img.thumbnail((200, 150), Image.LANCZOS)
-                self._logo_img = ImageTk.PhotoImage(img)
+            tb = self.titleBar
+            tb.titleLabel.setStyleSheet(
+                f"color: {DARK['accent']}; font-size: 13pt; font-weight: bold; background: transparent;"
+            )
+            if _logo_top:
+                self._setup_top_logo(_logo_top)
+            try:
+                self.navigationInterface.setReturnButtonVisible(True)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Titlebar customization warning: {e}")
+
+        self.closeEvent = self._on_close_event
+
+        if on_before_show is not None:
+            try:
+                on_before_show()
+            except Exception as e:
+                print(f"on_before_show hook warning: {e}")
+
+        self.show()
+        self._start_external_activation_listener()
+        QTimer.singleShot(1500, self._check_antispy_watchdog)
+
+        try:
+            hwnd = int(self.winId())
+            apply_global_style(QApplication.instance())
+            enable_rounded_corners(hwnd)
+            enable_acrylic(hwnd, dark=not IS_LIGHT_THEME)
+        except Exception as e:
+            print(f"Windows visual effects warning: {e}")
+
+    def _start_external_activation_listener(self):
+        self._ext_activate_signals = _ExternalActivateSignals()
+        self._ext_activate_signals.activate.connect(self._restore_and_activate)
+
+        def _listen():
+            try:
+                sa = _low_integrity_security_attributes()
+                sa_arg = ctypes.byref(sa) if sa is not None else None
+                handle = ctypes.windll.kernel32.CreateEventW(
+                    sa_arg, False, False, _EXTERNAL_ACTIVATE_EVENT_NAME
+                )
+                if not handle:
+                    return
+                INFINITE = 0xFFFFFFFF
+                WAIT_OBJECT_0 = 0x0
+                while True:
+                    result = ctypes.windll.kernel32.WaitForSingleObject(handle, INFINITE)
+                    if result != WAIT_OBJECT_0:
+                        break
+                    self._ext_activate_signals.activate.emit()
+            except Exception as e:
+                print(f"External activation listener warning: {e}")
+
+        self._ext_activate_thread = threading.Thread(target=_listen, daemon=True)
+        self._ext_activate_thread.start()
+
+    def _restore_and_activate(self):
+        try:
+            state = self.windowState()
+            if state & Qt.WindowMinimized:
+                self.setWindowState((state & ~Qt.WindowMinimized) | Qt.WindowActive)
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        except Exception as e:
+            print(f"Restore/activate warning: {e}")
+
+    def _setup_deselect_on_outside_click(self):
+        from PySide6.QtCore import Qt as _Qt
+        self.table.setFocusPolicy(_Qt.ClickFocus)
+
+        targets = [
+            getattr(self, "_toolbar_frame", None),
+            getattr(self, "_status_bar_frame", None),
+            getattr(self, "status_bar", None),
+            getattr(self, "titleBar", None),
+        ]
+        for w in targets:
+            if w is not None:
+                w.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.Type.MouseButtonPress and obj in self._options_nav_widgets:
+            now = time.monotonic()
+            if (now - self._options_click_guard_ts) * 1000 < self._options_click_guard_ms:
+                return True
+            self._options_click_guard_ts = now
+
+        if event.type() == QEvent.Type.MouseButtonPress and obj in (
+            getattr(self, "_toolbar_frame", None),
+            getattr(self, "_status_bar_frame", None),
+            getattr(self, "status_bar", None),
+            getattr(self, "titleBar", None),
+        ):
+            QTimer.singleShot(0, self._safe_clear_table_selection)
+        return super().eventFilter(obj, event)
+
+    def _safe_clear_table_selection(self):
+        try:
+            if hasattr(self, 'table') and self.table is not None:
+                self.table.clearSelection()
+                self.table.setCurrentCell(-1, -1)
         except Exception:
             pass
-        # ───────────────────────────────────────────────────────────────────────────────
 
-        self._build_ui()
-        self._fit_window_to_content()
-        self._load()
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+    def _check_antispy_watchdog(self):
+        try:
+            self._privacy_page.set_watchdog_running(True)
+        except Exception as e:
+            print(f"AntiSpy watchdog warning: {e}")
 
-    def _safe_geometry(self, saved: str) -> str:
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        default_w, default_h = 900, 580
+        signals = _AntiSpyWatchdogSignals()
+        signals.done.connect(self._on_antispy_watchdog_checked)
+        self._antispy_watchdog_signals = signals
+        self._bg_signal_objs.append(signals)
 
-        if saved:
-            m = re.match(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", saved)
-            if m:
-                w, h, x, y = int(m[1]), int(m[2]), int(m[3]), int(m[4])
-                if (x + 100 <= sw and y + 100 <= sh and x + w >= 100 and y + h >= 100):
-                    w = min(w, sw)
-                    h = min(h, sh)
-                    return f"{w}x{h}+{x}+{y}"
+        def worker():
+            try:
+                from .core_antispy import AntiSpyManager, run_startup_seed
+                run_startup_seed()
+                drifted, restored = AntiSpyManager.get_drifted_items()
+            except Exception as e:
+                print(f"AntiSpy watchdog warning: {e}")
+                drifted, restored = [], []
+            signals.done.emit(drifted, restored)
 
-        w = min(default_w, sw)
-        h = min(default_h, sh)
-        x = (sw - w) // 2
-        y = (sh - h) // 2
-        return f"{w}x{h}+{x}+{y}"
+        threading.Thread(target=worker, daemon=True).start()
 
-    def _fit_window_to_content(self):
-        self.update_idletasks()
-        toolbar_w = getattr(self, "_toolbar", self).winfo_reqwidth()
-        sidebar_w = getattr(self, "_sidebar", self).winfo_reqwidth()
-        min_w = max(900, toolbar_w + sidebar_w + 24)
-        min_h = max(520, self.winfo_reqheight())
+    def _on_antispy_watchdog_checked(self, drifted_items: list, restored_items: list):
+        restored_items = restored_items or []
+        self._antispy_drifted_ids = set(drifted_items)
+        try:
+            self._privacy_page.set_drifted(self._antispy_drifted_ids)
+        except Exception as e:
+            print(f"AntiSpy watchdog warning: {e}")
 
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        min_w = min(min_w, sw)
-        min_h = min(min_h, sh - 40)
-        self.minsize(min_w, min_h)
+        if restored_items:
+            try:
+                self._show_antispy_restored_notice(restored_items)
+            except Exception as e:
+                print(f"AntiSpy watchdog warning: {e}")
 
-        m = re.match(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", self.geometry())
-        if not m:
+        if not drifted_items:
             return
-        w, h, x, y = map(int, m.groups())
-        new_w = max(w, min_w)
-        new_h = max(h, min_h)
-        x = max(0, min(x, sw - new_w))
-        y = max(0, min(y, sh - new_h))
-        if (new_w, new_h) != (w, h):
-            self.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        try:
+            from .core_antispy import ITEMS
+            names_map = {
+                "basic": T("par_antispy_basic_btn"),
+                "medium": T("par_antispy_medium_btn"),
+                "advanced": T("par_antispy_advanced_btn"),
+            }
+            item_levels = {it["id"]: it["level"] for it in ITEMS}
+            levels_drifted = sorted({item_levels[i] for i in drifted_items if i in item_levels},
+                                     key=("basic", "medium", "advanced").index)
+            modules_txt = ", ".join(names_map[lvl] for lvl in levels_drifted)
 
-    def _resize_start_drag(self, event):
-        self._resize_start = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+            bar = InfoBar(
+                icon=InfoBarIcon.WARNING,
+                title=T("antispy_watchdog_title"),
+                content=T("antispy_watchdog_msg", modules=modules_txt),
+                orient=Qt.Vertical,
+                isClosable=True,
+                duration=-1,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            reapply_btn = HOTSButton(FIF.SYNC, DARK["accent"], T("antispy_watchdog_reapply_btn"))
+            reapply_btn.fit_to_content()
 
-    def _resize_drag(self, event):
-        if not self._resize_start:
-            return
-        start_x, start_y, start_w, start_h = self._resize_start
-        min_w, min_h = self.minsize()
-        new_w = max(min_w, start_w + event.x_root - start_x)
-        new_h = max(min_h, start_h + event.y_root - start_y)
-        self.geometry(f"{new_w}x{new_h}")
+            action_row = QWidget()
+            action_lay = QHBoxLayout(action_row)
+            action_lay.setContentsMargins(0, 0, 0, 0)
+            action_lay.setSpacing(6)
 
-    def _on_close(self):
-        if self._dirty:
-            if not DarkDialog.ask(self, T("dlg_unsaved_title"), T("dlg_unsaved_msg")):
+            busy_spinner = None
+            if IndeterminateProgressRing is not None:
+                busy_spinner = IndeterminateProgressRing()
+                busy_spinner.setFixedSize(14, 14)
+                busy_spinner.setStrokeWidth(2)
+                busy_spinner.setVisible(False)
+                action_lay.addWidget(busy_spinner, 0, Qt.AlignVCenter)
+
+            busy_lbl = QLabel(T("priv_op_working"))
+            busy_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent;")
+            busy_lbl.setVisible(False)
+            action_lay.addWidget(busy_lbl, 0, Qt.AlignVCenter)
+
+            action_lay.addWidget(reapply_btn, 0, Qt.AlignVCenter)
+
+            def _on_reapply_clicked(_c=False, d=list(drifted_items), b=bar,
+                                     btn=reapply_btn, spin=busy_spinner, lbl=busy_lbl):
+                btn.setEnabled(False)
+                btn.setVisible(False)
+                if spin is not None:
+                    spin.setVisible(True)
+                lbl.setVisible(True)
+                self._reapply_antispy_drift(d, b)
+
+            reapply_btn.clicked.connect(_on_reapply_clicked)
+            bar.addWidget(action_row)
+            bar.show()
+        except Exception as e:
+            print(f"AntiSpy watchdog warning: {e}")
+
+    def _show_antispy_restored_notice(self, restored_items: list):
+        from .core_antispy import ITEMS
+        names_map = {
+            "basic": T("par_antispy_basic_btn"),
+            "medium": T("par_antispy_medium_btn"),
+            "advanced": T("par_antispy_advanced_btn"),
+        }
+        item_levels = {it["id"]: it["level"] for it in ITEMS}
+        levels_restored = sorted({item_levels[i] for i in restored_items if i in item_levels},
+                                  key=("basic", "medium", "advanced").index)
+        modules_txt = ", ".join(names_map[lvl] for lvl in levels_restored)
+
+        InfoBar.info(
+            title=T("antispy_watchdog_restored_title"),
+            content=T("antispy_watchdog_restored_msg", modules=modules_txt),
+            orient=Qt.Horizontal,
+            isClosable=True,
+            duration=5000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _reapply_antispy_drift(self, drifted_items: list, bar):
+        from .core_antispy import AntiSpyManager
+
+        signals = _AntiSpyReapplySignals()
+        signals.done.connect(lambda results: self._on_antispy_reapply_done(results, bar))
+        self._antispy_reapply_signals = signals
+        self._bg_signal_objs.append(signals)
+
+        def worker(ids=list(drifted_items)):
+            results = {i: AntiSpyManager.enable_item(i) for i in ids}
+            signals.done.emit(results)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_antispy_reapply_done(self, results: dict, bar):
+        try:
+            bar.close()
+        except Exception:
+            pass
+
+        fixed_ids = {i for i, ok in results.items() if ok}
+        self._antispy_drifted_ids -= fixed_ids
+        try:
+            self._privacy_page.set_drifted(self._antispy_drifted_ids)
+        except Exception as e:
+            print(f"AntiSpy watchdog warning: {e}")
+
+        if all(results.values()):
+            InfoBar.success(
+                title=T("save_success_title"),
+                content=T("antispy_watchdog_reapply_success"),
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self,
+            )
+        else:
+            from .core_antispy import ITEMS
+            label_by_id = {it["id"]: T(it["label_key"]) for it in ITEMS}
+            failed = [label_by_id.get(i, i) for i, ok in results.items() if not ok]
+            HOTSDialog.error(self, T("par_antispy_err_title"),
+                             T("par_antispy_err_msg") + "\n\n" + ", ".join(failed))
+
+    def _setup_top_logo(self, path: str):
+        try:
+            tb = self.titleBar
+            if hasattr(tb, "iconLabel"):
+                tb.iconLabel.hide()
+            tb.titleLabel.hide()
+
+            pix = QPixmap(path)
+            if pix.isNull():
                 return
-        self._settings["geometry"] = self.geometry()
-        self._settings["language"] = current_lang()
-        save_settings(self._settings)
-        self.destroy()
 
-    def _build_ui(self):
-        # ── Custom title bar ───────────────────────────────────────────────
-        self._titlebar = CustomTitlebar(self, title="HOTS", on_close=self._on_close, on_minimize=self.iconify)
-        self._titlebar.pack(fill="x", side="top")
+            margin = 6
+            scale_factor = 0.50
+            target_h = max(int((tb.height() - margin) * scale_factor), 12)
+            scaled = pix.scaledToHeight(target_h, Qt.SmoothTransformation)
 
-        self._title_suffix = tk.Label(self._titlebar, text="Developed by Darsono", bg=self._titlebar["bg"], fg=DARK["fg2"], font=("Segoe UI", 9, "normal"))
-        self._title_suffix.pack(side="left", padx=(2, 10))
+            self._logo_lbl = QLabel(tb)
+            self._logo_lbl.setPixmap(scaled)
+            self._logo_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self._logo_lbl.setStyleSheet("background: transparent;")
+            self._logo_lbl.adjustSize()
 
-        # ── Sidebar ────────────────────────────────────────────────────────
-        self._sidebar = tk.Frame(self, bg=DARK["bg2"], width=180, highlightthickness=1, highlightbackground=DARK["border"])
-        self._sidebar.pack(side="left", fill="y")
-        sidebar = self._sidebar
+            start_x = tb.iconLabel.x() if hasattr(tb, "iconLabel") else 10
+            y = (tb.height() - self._logo_lbl.height()) // 2
+            self._logo_lbl.move(start_x, y)
+            self._logo_lbl.show()
+            self._logo_lbl.raise_()
+        except Exception as e:
+            print(f"Top logo setup warning: {e}")
 
-        if self._logo_img:
-            logo_lbl = tk.Label(sidebar, image=self._logo_img, bg=DARK["bg2"], cursor="arrow")
-            logo_lbl.pack(padx=12, pady=(14, 6))
-            tk.Frame(sidebar, bg=DARK["border"], height=1).pack(fill="x", padx=8, pady=(4, 10))
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._adjust_columns_on_resize)
 
-        make_btn(sidebar, "🛠", "#80d4ff", T("btn_repair"),    self._repair).pack(fill="x", padx=8, pady=(10, 4))
-        make_btn(sidebar, "🧹", "#ffa060", T("btn_default"), self._restore_default).pack(fill="x", padx=8, pady=4)
+    def _find_asset(self, name: str) -> str:
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        p = os.path.join(base, name)
+        return p if os.path.exists(p) else ""
 
-        tk.Frame(sidebar, bg=DARK["border"], height=1).pack(fill="x", padx=8, pady=10)
+    def _nav(self, fn, route_key=None):
+        def _wrapper():
+            indices = self._selected_indices()
 
-        make_btn(sidebar, "\U0001f50d", "#80ffb0", T("btn_check_dom"), self._diag_existence).pack(fill="x", padx=8, pady=4)
-        make_btn(sidebar, "\U0001f6e1", "#ff8080", T("btn_malware"), self._diag_malware).pack(fill="x", padx=8, pady=4)
+            def _deferred():
+                fn()
+                if route_key:
+                    current = self.stackedWidget.currentWidget()
+                    if current is not None and current is not self._main_widget:
+                        self._page_route_map[current.objectName()] = route_key
+                    self.navigationInterface.setCurrentItem(route_key)
+                if indices and hasattr(self, "table"):
+                    for row in range(self.table.rowCount()):
+                        item = self.table.item(row, 0)
+                        if item and item.data(Qt.UserRole) in indices:
+                            self.table.selectRow(row)
 
-        tk.Frame(sidebar, bg=DARK["border"], height=1).pack(fill="x", padx=8, pady=10)
+            QTimer.singleShot(0, _deferred)
 
-        make_btn(sidebar, "🛡️", "#ff9f43", T("btn_parental"), self._open_parental_control).pack(fill="x", padx=8, pady=4)
+        return _wrapper
 
-        tk.Frame(sidebar, bg=DARK["border"], height=1).pack(fill="x", padx=8, pady=10)
+    def _build_navigation(self):
+        nav = self.navigationInterface
 
-        # ── Options (bottom of sidebar) ───────────────────────────────────
-        sidebar_bottom = tk.Frame(sidebar, bg=DARK["bg2"])
-        sidebar_bottom.pack(side="bottom", fill="x", padx=8, pady=(4, 10))
+        nav.addItem(routeKey="repair",    icon=FIF.CODE,      text=T("btn_repair"),      onClick=self._nav(self._repair, "repair"),    position=NavigationItemPosition.TOP)
+        nav.addItem(routeKey="default",   icon=FIF.BROOM,     text=T("btn_default"),     onClick=self._nav(self._restore_default, "default"), position=NavigationItemPosition.TOP)
+        nav.addItem(routeKey="check_dom", icon=FIF.SEARCH,    text=T("btn_check_dom"),   onClick=self._nav(self._diag_existence, "check_dom"), position=NavigationItemPosition.TOP)
+        nav.addItem(routeKey="malware",   icon=FIF.VPN,       text=T("btn_malware"),     onClick=self._nav(self._diag_malware, "malware"), position=NavigationItemPosition.TOP)
+        nav.addItem(routeKey="parental",  icon=FIF.PEOPLE,    text=T("btn_parental"),    onClick=self._nav(self._open_parental_control, "parental"), position=NavigationItemPosition.TOP)
+        nav.addItem(routeKey="privacy",   icon=FIF.HIDE,      text=T("btn_privacy"),     onClick=self._nav(self._open_privacy, "privacy"), position=NavigationItemPosition.TOP)
 
-        tk.Frame(sidebar, bg=DARK["border"], height=1).pack(side="bottom", fill="x", padx=8, pady=(0, 2))
+        nav.addItem(routeKey="options",   icon=FIF.SETTING,   text=T("btn_options"),     selectable=False,        position=NavigationItemPosition.BOTTOM)
+        nav.addItem(routeKey="about",     icon=FIF.INFO,      text=T("opt_about"),       onClick=self._nav(self._about, "about"),     position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
+        nav.addItem(routeKey="support",   icon=FIF.HEART,     text=T("opt_support"),     onClick=self._nav(self._support, "support"),   position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
+        nav.addItem(routeKey="rawview",   icon=FIF.DOCUMENT,  text=T("opt_show_raw"),    onClick=self._nav(self._show_raw_view, "rawview"), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
+        nav.addItem(routeKey="password",  icon=FIF.HIDE,      text=T("opt_pass_off"),    onClick=self._nav(self._manage_password), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
+        nav.addItem(routeKey="language",  icon=FIF.GLOBE,     text=T("opt_language"),    onClick=self._nav(self._change_language), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
+        nav.addItem(routeKey="theme",     icon=FIF.PALETTE,   text=T("opt_appearance"),      onClick=self._nav(self._change_accent_color), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
 
-        self._options_panel = tk.Frame(sidebar, bg=DARK["bg2"], highlightthickness=1, highlightbackground=DARK["border"])
-        self._options_visible = False
+        for _rk in ("options", "about", "support", "rawview", "password", "language", "theme"):
+            _w = nav.widget(_rk)
+            if _w is not None:
+                self._options_nav_widgets.add(_w)
+                _w.installEventFilter(self)
 
-        def _make_option_btn(parent, icon, icon_color, label, cmd):
-            f = tk.Frame(parent, bg=DARK["bg2"], cursor="hand2")
-            f.pack(fill="x")
-            inner = tk.Frame(f, bg=DARK["bg2"], cursor="hand2")
-            inner.pack(fill="x", padx=8, pady=4)
-            ico_lbl = tk.Label(inner, text=icon, bg=DARK["bg2"], fg=icon_color,
-                               font=("Segoe UI Emoji", 13), cursor="hand2")
-            ico_lbl.pack(side="left", padx=(2, 6))
-            txt_lbl = tk.Label(inner, text=label, bg=DARK["bg2"], fg=DARK["fg"],
-                               font=("Segoe UI", 9), anchor="w", cursor="hand2")
-            txt_lbl.pack(side="left", fill="x", expand=True)
+    def _build_main_view(self):
+        self._main_widget = QWidget()
+        self._main_widget.setObjectName("mainWidget")
+        self._main_widget.setStyleSheet("#mainWidget { background: transparent; border: none; }")
 
-            def on_enter(_):
-                for w in (f, inner, ico_lbl, txt_lbl):
-                    w.config(bg=DARK["accent"])
-                txt_lbl.config(fg=DARK["accent_fg"])
-                ico_lbl.config(fg=icon_color)
-            def on_leave(_):
-                bg = DARK["accent"] if getattr(f, "_active", False) else DARK["bg2"]
-                for w in (f, inner, ico_lbl, txt_lbl):
-                    w.config(bg=bg)
-                txt_lbl.config(fg=DARK["fg"])
-                ico_lbl.config(fg=icon_color)
-            for w in (f, inner, ico_lbl, txt_lbl):
-                w.bind("<Enter>", on_enter)
-                w.bind("<Leave>", on_leave)
-                w.bind("<Button-1>", lambda _, c=cmd: c())
-            f._inner_widgets = (f, inner, ico_lbl, txt_lbl)
-            f._icon_color = icon_color
-            return f
+        root = QVBoxLayout(self._main_widget)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        _make_option_btn(self._options_panel, "ℹ️", "#60c8ff", T("opt_about"),    self._about)
-        tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
-        _make_option_btn(self._options_panel, "❤️", "#e05050", T("opt_support"),  self._support)
-        tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
-        self._raw_view_btn = _make_option_btn(self._options_panel, "📋", "#80ffb0", T("opt_show_raw"), self._toggle_raw_view)
-        tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
-        self._pass_option_btn = _make_option_btn(self._options_panel, "🔒", "#ffd080", self._pass_btn_label(), self._manage_password)
-        tk.Frame(self._options_panel, bg=DARK["border"], height=1).pack(fill="x")
-        _make_option_btn(self._options_panel, "🌐", "#a0d0ff", T("opt_language"),  self._change_language)
+        gold_line = QFrame()
+        gold_line.setFixedHeight(2)
+        gold_line.setStyleSheet(f"background-color: {DARK['accent']}; border: none;")
+        root.addWidget(gold_line)
 
-        def _toggle_options_panel():
-            if self._options_visible:
-                self._options_panel.pack_forget()
-                self._options_visible = False
-            else:
-                self._options_panel.pack(before=sidebar_bottom, fill="x", padx=8, pady=(0, 4))
-                self._options_visible = True
-                # Auto-expand window downward if needed
-                self._fit_window_to_content()
+        root.addWidget(self._build_toolbar())
 
-        make_btn(sidebar_bottom, "⚙️", "#ffd080", T("btn_options"), _toggle_options_panel).pack(fill="x")
+        self._table_widget = self._build_table()
+        self._raw_widget   = self._build_raw_view()
+        self._raw_widget.hide()
 
-        # ── Main container ────────────────────────────────────────────────
-        main_area = tk.Frame(self, bg=DARK["bg"])
-        main_area.pack(side="left", fill="both", expand=True)
+        root.addWidget(self._table_widget, 1)
+        root.addWidget(self._raw_widget,   1)
 
-        # ── Toolbar ───────────────────────────────────────────────────────
-        self._toolbar = tk.Frame(main_area, bg=DARK["bg2"], pady=8, padx=8, highlightthickness=1, highlightbackground=DARK["border"])
-        self._toolbar.pack(fill="x")
-        toolbar = self._toolbar
+        root.addWidget(self._build_status_bar())
 
-        for icon, icolor, label_key, cmd, acc in [
-            ("➕", "#4ec94e", "btn_add",    self._add,    False),
-            ("✏️", "#f0c040", "btn_edit",   self._edit,   False),
-            ("⏻",  "#a0a0ff", "btn_toggle", self._toggle, False),
-            ("🗑", "#e05050", "btn_delete", self._delete, False),
-        ]:
-            make_btn(toolbar, icon, icolor, T(label_key), cmd, acc).pack(side="left", padx=3)
+        self._setup_deselect_on_outside_click()
 
-        self._save_btn = make_btn(toolbar, "💾", "#60c8ff", T("btn_save"), self._save, accent=False)
-        self._save_btn.pack(side="left", padx=3)
-        self._dirty = False
+        self.addSubInterface(interface=self._main_widget, icon=FIF.HOME, text="HOTS Hosts")
+        self.navigationInterface.widget("mainWidget").clicked.connect(self._show_table_view)
 
-        tk.Frame(toolbar, bg=DARK["border"], width=1).pack(side="left", fill="y", padx=8, pady=4)
+    def _build_backup_page(self):
+        from .dialogs import BackupManagerPage
+        self._backup_page = BackupManagerPage(self, HOSTS_PATH, on_restore=self._load,
+                                              on_backup_count_changed=self._update_status)
+        self.addSubInterface(interface=self._backup_page, icon=FIF.SAVE, text=T("bak_title"))
+        self.navigationInterface.widget("backupInterface").hide()
 
-        for icon, icolor, label_key, cmd in [
-            ("📥", "#80d4ff", "btn_import",  self._import),
-            ("📤", "#ffa060", "btn_export",  self._export),
-            ("🗂", "#c0a0ff", "btn_backups", self._backups),
-        ]:
-            make_btn(toolbar, icon, icolor, T(label_key), cmd).pack(side="left", padx=3)
+        from .dialogs import DiagnosticsPage
+        self._diagnostics_page = DiagnosticsPage(self)
+        self.addSubInterface(interface=self._diagnostics_page, icon=FIF.SEARCH, text=T("diag_title_existence"))
+        self.navigationInterface.widget("diagnosticsInterface").hide()
 
-        # ── Context menu ──────────────────────────────────────────────────
-        self.menu = tk.Menu(self, tearoff=0, bg=DARK["bg2"], fg=DARK["fg"], activebackground=DARK["accent"], activeforeground=DARK["accent_fg"], relief="flat", bd=0)
-        self.menu.add_command(label=T("ctx_edit"),    command=self._edit)
-        self.menu.add_command(label=T("ctx_delete"),  command=self._delete)
-        self.menu.add_command(label=T("ctx_toggle"),  command=self._toggle)
-        self.menu.add_separator()
-        self.menu.add_command(label=T("ctx_zero_ip"), command=self._set_zero_ip)
+        from .dialogs import ParentalPage
+        self._parental_page = ParentalPage(self)
+        self.addSubInterface(interface=self._parental_page, icon=FIF.PEOPLE, text=self._parental_page._title_text)
+        self.navigationInterface.widget("parentalInterface").hide()
 
-        # ── Search bar ────────────────────────────────────────────────────
-        search_bar = tk.Frame(main_area, bg=DARK["search_bg"], highlightthickness=1, highlightbackground=DARK["border"])
-        search_bar.pack(fill="x")
+        from .dialogs import PrivacyPage
+        self._privacy_page = PrivacyPage(self)
+        self.addSubInterface(interface=self._privacy_page, icon=FIF.HIDE, text=self._privacy_page._title_text)
+        self.navigationInterface.widget("privacyInterface").hide()
+        self._antispy_drifted_ids = set()
+        self._privacy_page.busy_changed.connect(self._set_navigation_locked)
 
-        tk.Label(search_bar, text="🔍", bg=DARK["search_bg"], fg=DARK["fg2"], font=("Segoe UI Emoji", 12)).pack(side="left", padx=(10, 4), pady=5)
+        from .dialogs import SupportPage
+        self._support_page = SupportPage(self)
+        self.addSubInterface(interface=self._support_page, icon=FIF.HEART, text=T("sup_title"))
+        self.navigationInterface.widget("supportInterface").hide()
 
-        self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", self._on_search)
-        se = tk.Entry(search_bar, textvariable=self.search_var, bg=DARK["search_bg"], fg=DARK["fg"], insertbackground=DARK["fg"], selectbackground=DARK["accent"], selectforeground=DARK["accent_fg"], relief="flat", bd=0, font=("Segoe UI", 10), highlightthickness=0)
-        se.pack(side="left", fill="x", expand=True, pady=6)
-        _add_paste_menu(se)
+        from .dialogs import AboutPage
+        self._about_page = AboutPage(self)
+        self.addSubInterface(interface=self._about_page, icon=FIF.INFO, text=self._about_page._title_text)
+        self.navigationInterface.widget("aboutInterface").hide()
 
-        self.search_count = tk.Label(search_bar, text="", bg=DARK["search_bg"], fg=DARK["fg2"], font=("Segoe UI", 9))
-        self.search_count.pack(side="right", padx=10)
+        self.stackedWidget.currentChanged.connect(self._on_stack_changed)
 
-        clr = tk.Label(search_bar, text="\u2715", bg=DARK["search_bg"], fg=DARK["fg2"], font=("Segoe UI", 11), cursor="hand2")
-        clr.pack(side="right", padx=(0, 4))
-        clr.bind("<Button-1>", lambda _: self.search_var.set(""))
+    def _set_navigation_locked(self, locked: bool):
+        self.navigationInterface.setEnabled(not locked)
+        tip = T("priv_nav_locked_tooltip") if locked else ""
+        self.navigationInterface.setToolTip(tip)
 
-        # ── Table (Treeview) ──────────────────────────────────────────────
-        frame = tk.Frame(main_area, bg=DARK["bg"])
-        self._table_frame = frame
-        frame.pack(fill="both", expand=True, padx=8, pady=(6, 0))
+    def _on_stack_changed(self, index):
+        if self._raw_mode and self.stackedWidget.currentWidget() is not self._main_widget:
+            self._show_table_view()
 
-        self._raw_frame = tk.Frame(main_area, bg=DARK["bg"])
-        self._raw_view_active = False
+        widget = self.stackedWidget.currentWidget()
+        if widget is not None:
+            visible_key = self._page_route_map.get(widget.objectName(), widget.objectName())
+            self.navigationInterface.setCurrentItem(visible_key)
 
-        cols = ("status", "ip", "hostname", "comment")
-        self.tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="extended")
-        self.tree.heading("status",   text=T("col_status"),   command=lambda: self._sort_col("status"))
-        self.tree.heading("ip",       text=T("col_ip"),       command=lambda: self._sort_col("ip"))
-        self.tree.heading("hostname", text=T("col_hostname"), command=lambda: self._sort_col("hostname"))
-        self.tree.heading("comment",  text=T("col_comment"),  command=lambda: self._sort_col("comment"))
-        self.tree.column("status",   width=110, anchor="center", stretch=False)
-        self.tree.column("ip",       width=160, stretch=False)
-        self.tree.column("hostname", width=280)
-        self.tree.column("comment",  width=210)
+        if widget is not self._main_widget and hasattr(self, "_search_edit") and self._search_edit.text():
+            self._search_edit.clear()
 
-        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
+    def _build_toolbar(self) -> QWidget:
+        bar = QFrame()
+        bar.setObjectName("toolbar")
+        self._toolbar_frame = bar
+        bar.setFixedHeight(68)
+        bar.setStyleSheet(f"#toolbar {{ background-color: {DARK['toolbar_bg']}; border-bottom: 1px solid {DARK['border_faint']}; }}")
+
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(8)
+
+        hov_frame = QFrame()
+        hov_frame.setObjectName("hovInfo")
+        hov_frame.setFixedWidth(165)
+        hov_frame.setStyleSheet(
+            "QFrame#hovInfo {"
+            f"  background: {DARK['border_faint']};"
+            f"  border: 1px solid {DARK['border_soft']};"
+            "  border-radius: 8px;"
+            "}"
+        )
+        hov_lay = QHBoxLayout(hov_frame)
+        hov_lay.setContentsMargins(10, 0, 10, 0)
+        hov_lay.setSpacing(8)
+        hov_lay.setAlignment(Qt.AlignCenter)
+
+        hov_icon_lbl = QLabel()
+        hov_icon_lbl.setFixedSize(18, 18)
+        hov_icon_lbl.setAlignment(Qt.AlignCenter)
+        hov_icon_lbl.setStyleSheet("background: transparent; border: none;")
+        hov_lay.addWidget(hov_icon_lbl)
+
+        hov_text_lbl = QLabel("")
+        hov_text_lbl.setStyleSheet(
+            f"color: {DARK['fg2']}; font-size: 10pt; background: transparent; border: none;"
+        )
+        hov_lay.addWidget(hov_text_lbl)
+
+        def _set_hov(icon, label, color=None):
+            if color is None:
+                color = DARK['accent']
+            try:
+                px = icon.icon(color=QColor(color)).pixmap(QSize(16, 16))
+                hov_icon_lbl.setPixmap(px)
+            except Exception:
+                hov_icon_lbl.clear()
+            hov_text_lbl.setText(label)
+            hov_text_lbl.setStyleSheet(
+                f"color: {color}; font-size: 10pt; font-weight: 600;"
+                f" background: transparent; border: none;"
+            )
+
+        def _clear_hov():
+            hov_icon_lbl.clear()
+            hov_text_lbl.setText("")
+            hov_text_lbl.setStyleSheet(
+                f"color: {DARK['fg2']}; font-size: 10pt;"
+                f" background: transparent; border: none;"
+            )
+
+        self._hov_filters: list = []
+
+        def _hook(btn, icon, label):
+            class _F(QObject):
+                def eventFilter(self_, obj, event):
+                    from PySide6.QtCore import QEvent
+                    t = event.type()
+                    if t == QEvent.Type.Enter:
+                        _set_hov(icon, label)
+                    elif t == QEvent.Type.Leave:
+                        _clear_hov()
+                    return False
+            f = _F(btn)
+            btn.installEventFilter(f)
+            self._hov_filters.append(f)
+
+        def _tb(icon, color, label_key, slot):
+            b = HOTSButton(icon, color, "")
+            b.setFixedWidth(44)
+            b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            b.clicked.connect(slot)
+            _hook(b, icon, T(label_key))
+            return b
+
+        btn_add     = _tb(FIF.ADD,     DARK['accent'], "btn_add",     self._add)
+        btn_edit    = _tb(FIF.EDIT,    DARK['accent'], "btn_edit",    self._edit)
+        btn_toggle  = _tb(FIF.SYNC,    DARK['accent'], "btn_toggle",  self._toggle)
+        btn_delete  = _tb(FIF.DELETE,  DARK['accent'], "btn_delete",  self._delete)
+        btn_backups = _tb(FIF.HISTORY, DARK['accent'], "btn_backups", self._backups)
+
+        self._save_btn = HOTSButton(FIF.SAVE, DARK['accent'], "")
+        self._save_btn.setFixedWidth(44)
+        self._save_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._save_btn.clicked.connect(self._save)
+        _hook(self._save_btn, FIF.SAVE, T("btn_save"))
+
+        btn_import = _tb(FIF.DOWNLOAD, DARK['accent'], "btn_import", self._import)
+        btn_export = _tb(FIF.SHARE,    DARK['accent'], "btn_export", self._export)
+
+        lay.addWidget(btn_add)
+        lay.addWidget(btn_edit)
+        lay.addWidget(btn_toggle)
+        lay.addWidget(btn_delete)
+
+        lay.addStretch(1)
+        lay.addWidget(hov_frame)
+        lay.addStretch(1)
+
+        lay.addWidget(self._save_btn)
+        lay.addWidget(btn_backups)
+        lay.addWidget(btn_import)
+        lay.addWidget(btn_export)
+
+        return bar
+
+    def _load_table_col_widths(self) -> list[int]:
+        defaults = [110, 160, 280]
+        raw = self._settings.get("table_col_widths", "")
+        try:
+            parts = [int(x) for x in raw.split(",")]
+            if len(parts) == 3 and all(p > 0 for p in parts):
+                return parts
+        except Exception:
+            pass
+        return defaults
+
+    def _load_table_sort_state(self) -> tuple[int, bool]:
+        try:
+            col = int(self._settings.get("table_sort_col", -1))
+        except Exception:
+            col = -1
+        rev = str(self._settings.get("table_sort_reverse", "")).strip().lower() in ("1", "true", "yes")
+        return col, rev
+
+    def _build_table(self) -> QWidget:
+        wrapper = QWidget()
+        wrapper.setStyleSheet("background: transparent; border: none;")
+        lay = QVBoxLayout(wrapper)
+        lay.setContentsMargins(8, 6, 8, 0)
+        lay.setSpacing(0)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(False)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setFixedHeight(40)
         
-        vsb.pack(side="right", fill="y")
-        self.tree.pack(side="left", fill="both", expand=True)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
+        self.table.horizontalHeader().sectionResized.connect(self._prevent_slider_escape)
+        
+        _saved_widths = self._load_table_col_widths()
+        self.table.setColumnWidth(0, _saved_widths[0])
+        self.table.setColumnWidth(1, _saved_widths[1])
+        self.table.setColumnWidth(2, _saved_widths[2])
+        self.table.verticalHeader().setDefaultSectionSize(40)
 
-        self.tree.tag_configure("on",  foreground=DARK["green"])
-        self.tree.tag_configure("off", foreground=DARK["gray"])
-        self.tree.bind("<Double-1>", lambda _: self._edit())
-        self.tree.bind("<Button-3>", self._show_context_menu)
+        self.table.setStyleSheet(
+            f"QTableWidget {{ background-color: {DARK['table_bg']}; alternate-background-color: {DARK['table_alt_bg']}; "
+            f"color: {DARK['fg']}; gridline-color: {DARK['grid_line']}; border: 1px solid {DARK['border_soft']}; "
+            f"selection-background-color: transparent; selection-color: {DARK['fg']}; "
+            f"font-family: 'Segoe UI'; font-size: 11pt; }}"
+            f"QTableWidget::item {{ border-left: none; border-right: none; border-top: none; "
+            f"border-bottom: 1px solid {DARK['border_faint']}; padding: 0px 8px; outline: 0; }}"
+            f"QTableWidget::item:selected {{ background-color: {accent_rgba(0.10)}; "
+            f"border-bottom: 1px solid {accent_rgba(0.12)}; color: {DARK['fg']}; }}"
+            f"QTableWidget::item:selected:active {{ background-color: {accent_rgba(0.10)}; }}"
+            f"QTableWidget::item:selected:!active {{ background-color: {accent_rgba(0.07)}; }}"
+            f"QTableWidget::item:focus {{ outline: 0; border: none; background-color: {accent_rgba(0.10)}; }}"
+            f"QHeaderView::section {{ background-color: {DARK['header_bg']}; color: {DARK['fg2']}; "
+            f"border: none; border-right: 1px solid {DARK['border_strong']}; border-bottom: 1px solid {DARK['border_soft']}; padding: 4px 8px; "
+            f"font-family: 'Segoe UI'; font-size: 11pt; font-weight: normal; }}"
+            f"QHeaderView::section:last {{ border-right: none; }}"
+            f"QHeaderView::section:hover {{ color: {DARK['fg']}; }}"
+        )
 
-        # ── Status bar ────────────────────────────────────────────────────
-        tk.Label(main_area, anchor="e", text=T("hint_multiselect"), padx=10, pady=3, bg=DARK["bg2"], fg=DARK["fg2"], font=("Segoe UI", 8)).pack(fill="x", side="bottom")
+        self.table.setItemDelegate(_NoFocusDelegate(self.table))
+        self.table.horizontalHeader().sectionClicked.connect(self._sort_col)
+        self._sort_col_active, self._sort_col_reverse = self._load_table_sort_state()
+        self._update_sort_headers()
 
-        self.status_bar = tk.Label(main_area, anchor="w", padx=10, pady=4, bg=DARK["bg2"], fg=DARK["fg2"], font=("Segoe UI", 9), highlightthickness=1, highlightbackground=DARK["border"])
-        self.status_bar.pack(fill="x", side="bottom")
+        self.table.doubleClicked.connect(lambda _: self._edit())
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
 
-        self._resize_grip = tk.Frame(self, bg=DARK["border"], width=14, height=14, cursor="size_nw_se")
-        self._resize_grip.place(relx=1.0, rely=1.0, anchor="se")
-        self._resize_grip.bind("<ButtonPress-1>", self._resize_start_drag)
-        self._resize_grip.bind("<B1-Motion>", self._resize_drag)
+        lay.addWidget(self.table)
 
-    def _pass_btn_label(self) -> str:
-        from .__main__ import _reg_get_password
-        has = bool(_reg_get_password())
-        return T("opt_pass_on") if has else T("opt_pass_off")
+        return wrapper
 
-    def _refresh_pass_btn(self):
-        """Refreshes the password button label after state change."""
-        btn = getattr(self, "_pass_option_btn", None)
-        if btn is None:
+    def _prevent_slider_escape(self, logicalIndex, oldSize, newSize):
+        if logicalIndex >= 3:
             return
-        new_label = self._pass_btn_label()
-        for w in btn.winfo_children():          # inner Frame
-            for c in w.winfo_children():
-                if isinstance(c, tk.Label) and str(c.cget("font")).endswith("9"):
-                    c.config(text=new_label)
-                    return
+            
+        viewport_width = self.table.viewport().width()
+        min_comment_col_width = 50 
+        
+        other_widths = 0
+        for i in range(3):
+            if i != logicalIndex:
+                other_widths += self.table.columnWidth(i)
+                
+        max_allowed_width = viewport_width - other_widths - min_comment_col_width
+        
+        min_safe_width = 40
+        max_allowed_width = max(min_safe_width, max_allowed_width)
+        
+        if newSize > max_allowed_width:
+            self.table.horizontalHeader().blockSignals(True)
+            self.table.setColumnWidth(logicalIndex, max_allowed_width)
+            self.table.horizontalHeader().blockSignals(False)
 
-    def _manage_password(self):
-        """Opens the set/remove password dialog."""
-        if self._options_visible:
-            self._options_panel.pack_forget()
-            self._options_visible = False
-        from .__main__ import _reg_get_password, _reg_set_password
-        current_hash = _reg_get_password()
+    def _adjust_columns_on_resize(self):
+        if not hasattr(self, 'table') or self.table is None:
+            return
+            
+        viewport_width = self.table.viewport().width()
+        
+        w0 = self.table.columnWidth(0)
+        w1 = self.table.columnWidth(1)
+        w2 = self.table.columnWidth(2)
+        
+        total_interactive = w0 + w1 + w2
+        min_comment_col_width = 50
+        min_safe_width = 40
+        
+        max_allowed = viewport_width - min_comment_col_width
+        
+        if total_interactive > max_allowed and max_allowed > 0:
+            scale = max_allowed / total_interactive
+            
+            new_w0 = max(min_safe_width, int(w0 * scale))
+            new_w1 = max(min_safe_width, int(w1 * scale))
+            new_w2 = max(min_safe_width, max_allowed - new_w0 - new_w1)
+            
+            self.table.horizontalHeader().blockSignals(True)
+            self.table.setColumnWidth(0, new_w0)
+            self.table.setColumnWidth(1, new_w1)
+            self.table.setColumnWidth(2, new_w2)
+            self.table.horizontalHeader().blockSignals(False)
 
-        def on_save(new_hash: str):
-            _reg_set_password(new_hash)
-            self._refresh_pass_btn()
+    def _build_raw_view(self) -> QWidget:
+        wrapper = QWidget()
+        wrapper.setStyleSheet(f"background: transparent; border: none;")
+        lay = QVBoxLayout(wrapper)
+        lay.setContentsMargins(8, 4, 8, 0)
+        lay.setSpacing(4)
 
-        SetPasswordDialog(self, current_hash, on_save)
+        from qfluentwidgets import IconWidget as _IconWidget
 
-    def _change_language(self):
-        """Opens the language selection dialog."""
-        if self._options_visible:
-            self._options_panel.pack_forget()
-            self._options_visible = False
+        hdr_row = QHBoxLayout()
+        hdr_row.setSpacing(10)
+        hdr_ico = _IconWidget(FIF.DOCUMENT)
+        hdr_ico.setFixedSize(22, 22)
+        hdr_ico.setIcon(FIF.DOCUMENT.icon(color=QColor(DARK["accent"])))
+        hdr_row.addWidget(hdr_ico)
+        title = QLabel(T("raw_view_title"))
+        title.setStyleSheet(f"color: {DARK['accent']}; font-size: 14pt; font-weight: 600; background: transparent;")
+        hdr_row.addWidget(title)
+        hdr_row.addStretch()
+        lay.addLayout(hdr_row)
 
-        dlg = tk.Toplevel(self)
-        dlg.title(T("lang_title"))
-        dlg.configure(bg=DARK["bg2"])
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.transient(self)
+        hint = QLabel(T("raw_view_hint"))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {DARK['fg2']}; font-size: 10pt; background: transparent;")
+        lay.addWidget(hint)
 
-        # ── Header ────────────────────────────────────────────────────────
-        hdr = tk.Frame(dlg, bg=DARK["accent"], height=4)
-        hdr.pack(fill="x")
+        self._raw_editor = QTextEdit()
+        self._raw_editor.setFont(QFont("Consolas", 11))
+        self._raw_editor.setStyleSheet(
+            f"QTextEdit {{ background-color: {DARK['table_bg']}; color: {DARK['fg']}; "
+            f"border: 1px solid {DARK['border_soft']}; font-size: 11pt; }}"
+        )
+        self._raw_editor.setCursorWidth(2)
+        self._raw_editor.setLineWrapMode(QTextEdit.NoWrap)
+        self._raw_editor.textChanged.connect(self._raw_on_modified)
+        self._raw_editor.cursorPositionChanged.connect(self._raw_highlight_current_line)
+        self._raw_highlighter = _HostsHighlighter(self._raw_editor.document())
+        attach_text_edit_context_menu(self._raw_editor)
+        lay.addWidget(self._raw_editor, 1)
+        self._raw_highlight_current_line()
+        return wrapper
 
-        tk.Label(dlg, text="🌐  " + T("lang_title"),
-                 bg=DARK["bg2"], fg=DARK["fg"],
-                 font=("Segoe UI", 11, "bold")).pack(pady=(16, 10), padx=24, anchor="w")
+    def _raw_highlight_current_line(self):
+        line_color = QColor(DARK["accent"])
+        line_color.setAlpha(35)
+        selection = QTextEdit.ExtraSelection()
+        selection.format.setBackground(line_color)
+        selection.format.setProperty(selection.format.Property.FullWidthSelection, True)
+        selection.cursor = self._raw_editor.textCursor()
+        selection.cursor.clearSelection()
+        self._raw_editor.setExtraSelections([selection])
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16)
+    def _populate_raw_view(self):
+        text = entries_to_text(self.entries).rstrip("\n")
+        self._raw_editor.blockSignals(True)
+        self._raw_editor.setPlainText(text)
+        self._raw_editor.blockSignals(False)
+        self._raw_highlight_current_line()
 
-        # ── Radio buttons ─────────────────────────────────────────────────
-        lang_var = tk.StringVar(value=current_lang())
+    def _raw_on_modified(self):
+        self._mark_dirty()
 
-        radio_frame = tk.Frame(dlg, bg=DARK["bg2"])
-        radio_frame.pack(fill="x", padx=20, pady=(10, 4))
+    def _build_status_bar(self) -> QWidget:
+        bar = QFrame()
+        bar.setObjectName("statusBar")
+        self._status_bar_frame = bar
+        bar.setFixedHeight(54)
+        bar.setStyleSheet(
+            f"#statusBar {{"
+            f"  background-color: {DARK['statusbar_bg']};"
+            f"  border-top: 1px solid {DARK['border_faint']};"
+            f"}}"
+        )
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(14, 0, 10, 0)
+        lay.setSpacing(10)
 
-        flags = {"en": "🇬🇧", "pl": "🇵🇱", "fr": "🇫🇷"}
-        for code, name in LANGUAGES.items():
-            row = tk.Frame(radio_frame, bg=DARK["bg2"])
-            row.pack(fill="x", pady=3)
-            tk.Radiobutton(
-                row, text=f"{flags.get(code, '')}  {name}",
-                variable=lang_var, value=code,
-                bg=DARK["bg2"], fg=DARK["fg"],
-                selectcolor=DARK["bg3"],
-                activebackground=DARK["bg2"], activeforeground=DARK["fg"],
-                font=("Segoe UI", 10), cursor="hand2",
-                indicatoron=True
-            ).pack(side="left", padx=4)
+        from qfluentwidgets import TransparentToolButton as _TransparentToolButton
+        self._folder_btn = _TransparentToolButton(FIF.FOLDER)
+        self._folder_btn.setFixedSize(28, 28)
+        self._folder_btn.setIconSize(QSize(15, 15))
+        self._folder_btn.setIcon(FIF.FOLDER.icon(color=QColor(DARK["accent"])))
+        self._folder_btn.setCursor(Qt.PointingHandCursor)
+        self._folder_btn.setToolTip(HOSTS_PATH)
+        self._folder_btn.clicked.connect(self._open_hosts_folder)
+        lay.addWidget(self._folder_btn)
 
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(8, 0))
+        self.status_bar = QLabel("")
+        self.status_bar.setStyleSheet(
+            f"color: {DARK['fg2']}; font-size: 10pt; background: transparent;"
+        )
+        lay.addWidget(self.status_bar, 1)
 
-        # ── OK button ─────────────────────────────────────────────────────
-        def _apply():
-            chosen = lang_var.get()
-            if chosen != current_lang():
-                set_lang(chosen)
-                self._settings["language"] = chosen
-                save_settings(self._settings)
-                dlg.destroy()
-                DarkDialog.info(self, T("lang_title"), T("lang_restart_msg"))
-            else:
-                dlg.destroy()
+        search_frame = QFrame()
+        search_frame.setObjectName("statusSearch")
+        search_frame.setFixedHeight(34)
+        search_frame.setMinimumWidth(220)
+        search_frame.setMaximumWidth(340)
+        search_frame.setStyleSheet(
+            f"#statusSearch {{"
+            f"  background-color: {DARK['search_frame_bg']};"
+            f"  border: 1px solid {DARK['border_soft2']};"
+            f"  border-radius: 17px;"
+            f"}}"
+        )
+        sf_lay = QHBoxLayout(search_frame)
+        sf_lay.setContentsMargins(10, 0, 8, 0)
+        sf_lay.setSpacing(6)
 
-        btn_frame = tk.Frame(dlg, bg=DARK["bg2"])
-        btn_frame.pack(pady=14)
-        make_btn(btn_frame, "✔", "#80ffb0", "OK", _apply, accent=True).pack()
+        from qfluentwidgets import IconWidget as _IconWidget
+        lupa = _IconWidget(FIF.SEARCH)
+        lupa.setFixedSize(16, 16)
+        lupa.setAttribute(Qt.WA_TransparentForMouseEvents)
+        sf_lay.addWidget(lupa)
 
-        # ── Center dialog ─────────────────────────────────────────────────
-        dlg.update_idletasks()
-        w = max(dlg.winfo_reqwidth(), 280)
-        h = max(dlg.winfo_reqheight(), 220)
-        x = self.winfo_x() + (self.winfo_width()  - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText(T("search_placeholder"))
+        self._search_edit.setStyleSheet(
+            f"QLineEdit {{"
+            f"  background: transparent;"
+            f"  color: {DARK['fg']};"
+            f"  border: none;"
+            f"  font-size: 10pt;"
+            f"  font-weight: bold;"
+            f"  padding: 0;"
+            f"}}"
+        )
+        attach_line_edit_context_menu(self._search_edit)
+        self._search_edit.textChanged.connect(self._on_search)
+        sf_lay.addWidget(self._search_edit, 1)
 
-    def _about(self):
-        if self._options_visible:
-            self._options_panel.pack_forget()
-            self._options_visible = False
+        self._search_count = QLabel("")
+        self._search_count.setStyleSheet(
+            f"color: {accent_rgba(0.70)}; font-size: 9pt; font-weight: bold; background: transparent;"
+        )
+        sf_lay.addWidget(self._search_count)
 
-        dlg = tk.Toplevel(self)
-        dlg.title("About – HOTS")
-        dlg.configure(bg=DARK["bg"])
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.transient(self)
-        dlg.overrideredirect(False)
+        clr = ClickableLabel("✕")
+        clr.setStyleSheet(
+            f"color: {DARK['muted_fg']}; font-size: 11px; background: transparent;"
+        )
+        clr.setCursor(Qt.PointingHandCursor)
+        clr.clicked.connect(self._search_edit.clear)
+        sf_lay.addWidget(clr)
 
-        # ── Colored header ────────────────────────────────────────────────
-        hdr = tk.Frame(dlg, bg=DARK["accent"], height=5)
-        hdr.pack(fill="x")
+        lay.addWidget(search_frame)
+        return bar
 
-        # ── Logo + title ──────────────────────────────────────────────────
-        top = tk.Frame(dlg, bg=DARK["bg2"])
-        top.pack(fill="x")
+    def _open_hosts_folder(self):
+        import subprocess
+        folder = os.path.dirname(HOSTS_PATH)
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", HOSTS_PATH])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", folder])
+        else:
+            subprocess.Popen(["xdg-open", folder])
 
-        title_col = tk.Frame(top, bg=DARK["bg2"])
-        title_col.pack(side="left", fill="x", expand=True, padx=(20, 10), pady=18)
+    def _load(self):
+        self.entries = parse_hosts(HOSTS_PATH)
+        self._refresh_table()
+        self._update_status()
+        self._mark_clean()
 
-        tk.Label(title_col, text="HOTS",
-                 bg=DARK["bg2"], fg=DARK["accent"],
-                 font=("Segoe UI", 28, "bold")).pack(anchor="w")
+    def _refresh_table(self):
+        query = self._search_edit.text().lower().strip() if hasattr(self, "_search_edit") else ""
 
-        tk.Label(title_col, text=T("about_subtitle"),
-                 bg=DARK["bg2"], fg=DARK["fg2"],
-                 font=("Segoe UI", 11)).pack(anchor="w")
-
-        tk.Label(title_col, text=T("about_version"),
-                 bg=DARK["bg2"], fg=DARK["fg2"],
-                 font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
-
-        # ── Separator ──────────────────────────────────────────────────────
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16)
-
-        # ── Description ───────────────────────────────────────────────────
-        desc_frame = tk.Frame(dlg, bg=DARK["bg"])
-        desc_frame.pack(fill="x", padx=20, pady=(14, 6))
-
-        tk.Label(desc_frame,
-                 text=T("about_desc"),
-                 bg=DARK["bg"], fg=DARK["fg"],
-                 font=("Segoe UI", 9),
-                 justify="left").pack(anchor="w")
-
-        # ── Features ──────────────────────────────────────────────────────
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 4))
-
-        features_frame = tk.Frame(dlg, bg=DARK["bg"])
-        features_frame.pack(fill="x", padx=20, pady=(4, 10))
-
-        features = [
-            ("🛡️", T("about_feat_parental")),
-            ("🔍", T("about_feat_diag")),
-            ("💾", T("about_feat_backup")),
-            ("📋", T("about_feat_raw")),
-            ("🔒", T("about_feat_password")),
-            ("🌐", T("about_feat_lang")),
+        visible = [
+            (i, e) for i, e in enumerate(self.entries)
+            if e["enabled"] is not None
+            and (not query or any(
+                query in str(e.get(f, "")).lower()
+                for f in ("ip", "hostname", "comment")
+            ))
         ]
 
-        col_left  = tk.Frame(features_frame, bg=DARK["bg"])
-        col_right = tk.Frame(features_frame, bg=DARK["bg"])
-        col_left.pack(side="left", fill="x", expand=True)
-        col_right.pack(side="left", fill="x", expand=True)
+        COL_KEYS = ["status", "ip", "hostname", "comment"]
+        if 0 <= self._sort_col_active < len(COL_KEYS):
+            col = COL_KEYS[self._sort_col_active]
+            rev = self._sort_col_reverse
+            if col == "ip":
+                visible.sort(
+                    key=lambda p: tuple(int(x) if x.isdigit() else x
+                                       for x in re.split(r"(\d+)", p[1]["ip"])),
+                    reverse=rev
+                )
+            elif col == "status":
+                visible.sort(key=lambda p: 0 if p[1]["enabled"] else 1, reverse=rev)
+            else:
+                visible.sort(key=lambda p: str(p[1].get(col, "")).lower(), reverse=rev)
 
-        for i, (icon, label) in enumerate(features):
-            col = col_left if i % 2 == 0 else col_right
-            row = tk.Frame(col, bg=DARK["bg"])
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text=icon, bg=DARK["bg"], fg=DARK["accent"],
-                     font=("Segoe UI Emoji", 10)).pack(side="left", padx=(0, 6))
-            tk.Label(row, text=label, bg=DARK["bg"], fg=DARK["fg"],
-                     font=("Segoe UI", 9)).pack(side="left")
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(visible))
 
-        # ── Separator ──────────────────────────────────────────────────────
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(4, 0))
+        for row, (orig_idx, e) in enumerate(visible):
+            status_text = T("status_active") if e["enabled"] else T("status_disabled")
+            fg = QColor(DARK["green"]) if e["enabled"] else QColor(DARK["gray"])
 
-        # ── Footer: author + OK button ────────────────────────────────────
-        footer = tk.Frame(dlg, bg=DARK["bg2"])
-        footer.pack(fill="x")
+            items = [
+                status_text,
+                e["ip"],
+                e["hostname"],
+                e.get("comment", ""),
+            ]
+            for col, text in enumerate(items):
+                item = QTableWidgetItem(text)
+                if col == 3 and text:
+                    item.setForeground(QColor("#d4800a"))
+                else:
+                    item.setForeground(fg)
+                item.setData(Qt.UserRole, orig_idx)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                self.table.setItem(row, col, item)
 
-        tk.Label(footer,
-                 text=T("about_footer"),
-                 bg=DARK["bg2"], fg=DARK["fg2"],
-                 font=("Segoe UI", 8)).pack(side="left", padx=16, pady=12)
-
-        ok_btn = make_btn(footer, "✔", "#60c8ff", T("about_close"), dlg.destroy, accent=False)
-        ok_btn.pack(side="right", padx=12, pady=8)
-
-        # ── Center dialog ────────────────────────────────────────────────
-        dlg.update_idletasks()
-        w = max(dlg.winfo_reqwidth(), 380)
-        h = max(dlg.winfo_reqheight(), 320)
-        x = self.winfo_x() + (self.winfo_width()  - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
-
-    def _toggle_raw_view(self):
-        if self._options_visible:
-            self._options_panel.pack_forget()
-            self._options_visible = False
-
-        if self._raw_view_active:
-            self._raw_frame.pack_forget()
-            self._table_frame.pack(fill="both", expand=True, padx=8, pady=(6, 0))
-            self._raw_view_active = False
-            self._refresh_tree()
-            self._update_status()
+        total_real = sum(1 for e in self.entries if e["enabled"] is not None)
+        if query:
+            self._search_count.setText(f"{len(visible)} / {total_real}")
         else:
-            self._table_frame.pack_forget()
-            self._raw_frame.pack(fill="both", expand=True, padx=8, pady=(6, 0))
-            self._raw_view_active = True
-            self._build_raw_view()
+            self._search_count.setText("")
 
-        btn = getattr(self, "_raw_view_btn", None)
-        if btn:
-            btn._active = self._raw_view_active
-            active_bg = DARK["accent"] if self._raw_view_active else DARK["bg2"]
-            for w in btn._inner_widgets:
-                w.config(bg=active_bg)
+    def _update_status(self):
+        real = [e for e in self.entries if e["enabled"] is not None]
+        on   = sum(1 for e in real if e["enabled"])
+        off  = len(real) - on
+        baks = len(list_backups(HOSTS_PATH))
+        self.status_bar.setText(
+            f"{T('status_entries', total=len(real), active=on, disabled=off)}"
+            f"   |   {T('status_backups', n=baks)}"
+        )
 
-    def _build_raw_view(self):
-        for w in self._raw_frame.winfo_children():
-            w.destroy()
+    def _on_search(self):
+        if self._raw_mode:
+            self._search_raw_text()
+        else:
+            self._refresh_table()
 
-        bar = tk.Frame(self._raw_frame, bg=DARK["bg2"], pady=6, padx=8, highlightthickness=1, highlightbackground=DARK["border"])
-        bar.pack(fill="x")
+    def _search_raw_text(self):
+        from PySide6.QtGui import QTextCursor, QTextDocument
+        query = self._search_edit.text().strip()
 
-        tk.Label(bar, text=T("raw_view_hint"), bg=DARK["bg2"], fg=DARK["fg2"], font=("Segoe UI", 9), anchor="w").pack(side="left", padx=(0, 16))
-
-        editor_frame = tk.Frame(self._raw_frame, bg=DARK["bg"])
-        editor_frame.pack(fill="both", expand=True, padx=8, pady=(6, 4))
-
-        self._raw_line_nums = tk.Text(editor_frame, width=5, bg=DARK["bg2"], fg=DARK["fg2"], font=("Consolas", 11), relief="flat", bd=0, padx=6, state="disabled", cursor="arrow", highlightthickness=0, selectbackground=DARK["bg2"])
-        self._raw_line_nums.pack(side="left", fill="y")
-
-        tk.Frame(editor_frame, bg=DARK["border"], width=1).pack(side="left", fill="y")
-
-        vsb = ttk.Scrollbar(editor_frame, orient="vertical")
-        _hsb_style = ttk.Style()
-        _hsb_style.configure("Dark.Horizontal.TScrollbar",
-                             background=DARK["bg3"], troughcolor=DARK["bg"],
-                             bordercolor=DARK["bg"], arrowcolor=DARK["fg2"])
-        _hsb_style.map("Dark.Horizontal.TScrollbar",
-                       background=[("active", DARK["accent"]), ("pressed", DARK["accent"])])
-        hsb = ttk.Scrollbar(self._raw_frame, orient="horizontal",
-                            style="Dark.Horizontal.TScrollbar")
-        vsb.pack(side="right", fill="y")
-        hsb.pack(side="bottom", fill="x", padx=8)
-
-        self._raw_text = tk.Text(editor_frame, bg=DARK["bg"], fg=DARK["fg"], insertbackground=DARK["fg"], selectbackground=DARK["accent"], selectforeground=DARK["accent_fg"], font=("Consolas", 11), relief="flat", bd=0, padx=10, pady=4, wrap="none", undo=True, highlightthickness=0, yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        self._raw_text.pack(side="left", fill="both", expand=True)
-
-        vsb.config(command=self._raw_scroll_both)
-        hsb.config(command=self._raw_text.xview)
-
-        # ── TAG CONFIGURATION AND PRIORITY ────────────────────────────────
-        self._raw_text.tag_configure("cur_line", background=DARK["bg2"])
-        self._raw_text.tag_configure("comment", foreground=DARK["fg2"])
-        self._raw_text.tag_configure("active",  foreground=DARK["green"])
-        
-        # Critical: selection (sel) must sit above current-line highlight and syntax colors
-        self._raw_text.tag_raise("sel", "cur_line")
-        self._raw_text.tag_raise("sel", "comment")
-        self._raw_text.tag_raise("sel", "active")
-        # ───────────────────────────────────────────────────────────────
-
-        lines = []
-        for entry in self.entries:
-            if entry["enabled"] is None:
-                lines.append(entry.get("raw", ""))
-            elif entry["enabled"]:
-                line = f"{entry['ip']}\t{entry['hostname']}"
-                if entry.get("comment"):
-                    line += f"\t# {entry['comment']}"
-                lines.append(line)
-            else:
-                line = f"# {entry['ip']}\t{entry['hostname']}"
-                if entry.get("comment"):
-                    line += f"\t# {entry['comment']}"
-                lines.append(line)
-
-        content = "\n".join(lines)
-        self._raw_text.insert("1.0", content)
-        self._raw_text.edit_modified(False)
-        self._raw_apply_highlighting()
-        self._raw_update_line_nums()
-
-        self._raw_text.bind("<<Modified>>",    self._raw_on_modified)
-        self._raw_text.bind("<KeyRelease>",    self._raw_on_key)
-        self._raw_text.bind("<ButtonRelease>", self._raw_on_key)
-
-        def _select_line(event):
-            """Click on a line number selects the entire line in the editor."""
-            self._raw_text.focus_set()
-            idx = self._raw_text.index(f"@0,{event.y}")
-            line = idx.split(".")[0]
-            
-            self._raw_text.tag_remove("sel", "1.0", "end")
-            self._raw_text.tag_add("sel", f"{line}.0", f"{line}.end+1c")
-            self._raw_text.mark_set("insert", f"{line}.0")
-            return "break"
-
-        self._raw_line_nums.bind("<Button-1>", _select_line)
-        self._raw_text.bind("<Triple-Button-1>", lambda e: (
-            self._raw_text.tag_remove("sel", "1.0", "end"),
-            self._raw_text.tag_add("sel",
-                self._raw_text.index("insert linestart"),
-                self._raw_text.index("insert lineend+1c")),
-            "break"
-        ))
-
-    def _raw_scroll_both(self, *args):
-        self._raw_text.yview(*args)
-        self._raw_line_nums.yview(*args)
-
-    def _raw_update_line_nums(self):
-        self._raw_line_nums.config(state="normal")
-        self._raw_line_nums.delete("1.0", "end")
-        line_count = int(self._raw_text.index("end-1c").split(".")[0])
-        nums = "\n".join(str(i) for i in range(1, line_count + 1))
-        self._raw_line_nums.insert("1.0", nums)
-        self._raw_line_nums.config(state="disabled")
-
-    def _raw_apply_highlighting(self):
-        txt = self._raw_text
-        for tag in ("comment", "active"):
-            txt.tag_remove(tag, "1.0", "end")
-        line_count = int(txt.index("end-1c").split(".")[0])
-        for ln in range(1, line_count + 1):
-            line = txt.get(f"{ln}.0", f"{ln}.end").strip()
-            if not line:
-                continue
-            if line.startswith("#"):
-                txt.tag_add("comment", f"{ln}.0", f"{ln}.end")
-            else:
-                txt.tag_add("active", f"{ln}.0", f"{ln}.end")
-
-    def _raw_on_key(self, _event=None):
-        self._raw_text.tag_remove("cur_line", "1.0", "end")
-        cur = self._raw_text.index("insert").split(".")[0]
-        self._raw_text.tag_add("cur_line", f"{cur}.0", f"{cur}.end+1c")
-        
-        # Ensure selection (sel) keeps highest visual priority after every move/keystroke
-        self._raw_text.tag_raise("sel", "cur_line")
-
-        new_count = int(self._raw_text.index("end-1c").split(".")[0])
-        if new_count != getattr(self, "_raw_last_line_count", -1):
-            self._raw_last_line_count = new_count
-            self._raw_update_line_nums()
-
-        if hasattr(self, "_raw_hl_job"):
-            self.after_cancel(self._raw_hl_job)
-        self._raw_hl_job = self.after(120, self._raw_apply_highlighting)
-
-    def _raw_on_modified(self, _event=None):
-        if self._raw_text.edit_modified():
-            self._mark_dirty()
-            self._raw_text.edit_modified(False)
-
-    def _show_context_menu(self, event):
-        row = self.tree.identify_row(event.y)
-        if not row:
+        if not query:
+            self._search_count.setText("")
+            cursor = self._raw_editor.textCursor()
+            cursor.clearSelection()
+            self._raw_editor.setTextCursor(cursor)
             return
-        if row not in self.tree.selection():
-            self.tree.selection_set(row)
-        self.menu.post(event.x_root, event.y_root)
+
+        text = self._raw_editor.toPlainText()
+        lines = [l for l in text.split("\n") if l.strip()]
+        matches = sum(1 for l in lines if query.lower() in l.lower())
+        self._search_count.setText(f"{matches} / {len(lines)}")
+
+        cursor = self._raw_editor.textCursor()
+        cursor.movePosition(QTextCursor.Start)
+        self._raw_editor.setTextCursor(cursor)
+        found = self._raw_editor.find(query, QTextDocument.FindFlags())
+        if not found:
+            cursor = self._raw_editor.textCursor()
+            cursor.clearSelection()
+            self._raw_editor.setTextCursor(cursor)
+
+    def _sort_col(self, logical_index: int):
+        if self._sort_col_active == logical_index:
+            self._sort_col_reverse = not self._sort_col_reverse
+        else:
+            self._sort_col_active  = logical_index
+            self._sort_col_reverse = False
+        self._update_sort_headers()
+        self._refresh_table()
+
+    def _update_sort_headers(self):
+        col_keys = [T("col_status"), T("col_ip"), T("col_hostname"), T("col_comment")]
+        for i, label in enumerate(col_keys):
+            if i == self._sort_col_active:
+                item = QTableWidgetItem(label)
+                item.setData(Qt.DecorationRole, _sort_px(not self._sort_col_reverse))
+            else:
+                item = QTableWidgetItem(label + "  ⇅")
+            self.table.setHorizontalHeaderItem(i, item)
+
+    def _selected_indices(self) -> list[int]:
+        seen = set()
+        result = []
+        for item in self.table.selectedItems():
+            idx = item.data(Qt.UserRole)
+            if idx is not None and idx not in seen:
+                seen.add(idx)
+                if self.entries[idx]["enabled"] is not None:
+                    result.append(idx)
+        return result
+
+    def _selected_idx(self) -> int | None:
+        indices = self._selected_indices()
+        return indices[0] if indices else None
+
+    def _mark_dirty(self):
+        if not self._dirty:
+            self._dirty = True
+            self._save_btn.set_accent(True)
+
+    def _mark_clean(self):
+        if self._dirty:
+            self._dirty = False
+            self._save_btn.set_accent(False)
+
+    def _add(self):
+        from .dialogs import EntryDialog
+        existing = {e["hostname"].lower() for e in self.entries if e["enabled"] is not None}
+        dlg = EntryDialog(self, existing_hostnames=existing)
+        dlg.exec()
+
+        if dlg.result_list is not None:
+            added, candidate = len(dlg.result_list), self.entries + dlg.result_list
+        elif dlg.result:
+            added, candidate = 1, self.entries + [dlg.result]
+        else:
+            return
+
+        active_after = sum(1 for e in candidate if e.get("enabled") is True)
+        if active_after > MAX_ACTIVE_ENTRIES:
+            if not HOTSDialog.ask(self, T("add_limit_ask_title"),
+                                  T("add_limit_ask_msg", n=added,
+                                    total=active_after, max=MAX_ACTIVE_ENTRIES)):
+                return
+
+        self.entries = candidate
+        self._refresh_table(); self._update_status(); self._mark_dirty()
+
+    def _edit(self):
+        idx = self._selected_idx()
+        if idx is None:
+            HOTSDialog.info(self, T("no_sel_title"), T("no_sel_edit"))
+            return
+        from .dialogs import EntryDialog
+        dlg = EntryDialog(self, self.entries[idx])
+        dlg.exec()
+        if dlg.result:
+            self.entries[idx] = dlg.result
+            self._refresh_table(); self._update_status(); self._mark_dirty()
+
+    def _toggle(self):
+        indices = self._selected_indices()
+        if not indices:
+            HOTSDialog.info(self, T("no_sel_title"), T("no_sel_toggle"))
+            return
+        any_off = any(not self.entries[i]["enabled"] for i in indices)
+        for i in indices:
+            self.entries[i]["enabled"] = any_off
+        self._refresh_table(); self._update_status(); self._mark_dirty()
+
+    def _delete(self):
+        if self._raw_mode:
+            cursor = self._raw_editor.textCursor()
+            if cursor.hasSelection():
+                cursor.removeSelectedText()
+            self._mark_dirty()
+            return
+
+        indices = self._selected_indices()
+        if not indices:
+            HOTSDialog.info(self, T("no_sel_title"), T("no_sel_delete"))
+            return
+
+        if len(indices) == 1:
+            e = self.entries[indices[0]]
+            q = T("del_confirm_one", ip=e["ip"], hostname=e["hostname"])
+        else:
+            preview = "\n".join(
+                f"{self.entries[i]['ip']}  {self.entries[i]['hostname']}"
+                for i in indices[:10]
+            )
+            suffix = T("del_more", n=len(indices)-10) if len(indices) > 10 else ""
+            q = T("del_confirm_many", n=len(indices), preview=preview, suffix=suffix)
+
+        if not HOTSDialog.ask(self, T("del_confirm_title"), q):
+            return
+        for i in sorted(indices, reverse=True):
+            self.entries.pop(i)
+        self._refresh_table(); self._update_status(); self._mark_dirty()
 
     def _set_zero_ip(self):
         indices = self._selected_indices()
         if not indices:
             return
+        changed = False
         for i in indices:
-            if self.entries[i]["enabled"] is not None:
-                self.entries[i]["ip"] = "0.0.0.0"
-        self._refresh_tree()
-        self._update_status()
-        self._mark_dirty()
-
-    def _sort_col(self, col):
-        if not hasattr(self, "_sort_state"):
-            self._sort_state = {}
-        reverse = self._sort_state.get(col, False)
-        self._sort_state = {col: not reverse}
-
-        col_keys = {"status": "col_status", "ip": "col_ip", "hostname": "col_hostname", "comment": "col_comment"}
-        for c, key in col_keys.items():
-            self.tree.heading(c, text=T(key))
-        arrow = " \u25b2" if not reverse else " \u25bc"
-        self.tree.heading(col, text=T(col_keys[col]) + arrow)
-
-        self._sort_col_active  = col
-        self._sort_col_reverse = reverse
-        self._refresh_tree()
-
-    def _sort_key_for(self, col, e):
-        if col == "ip":
-            return tuple(int(x) if x.isdigit() else x for x in re.split(r"(\d+)", e["ip"]))
-        if col == "status":
-            return 0 if e["enabled"] else 1
-        return str(e.get(col, "")).lower()
-
-    def _on_search(self, *_):
-        self._refresh_tree()
-
-    def _mark_dirty(self):
-        if not self._dirty:
-            self._dirty = True
-            self._save_btn._base_bg = DARK["accent"]
-            for w in [self._save_btn] + self._save_btn.winfo_children():
-                w.configure(bg=DARK["accent"])
-            for w in self._save_btn.winfo_children():
-                w.configure(fg="#ffffff")
-
-    def _mark_clean(self):
-        if self._dirty:
-            self._dirty = False
-            self._save_btn._base_bg = DARK["btn_bg"]
-            for w in [self._save_btn] + self._save_btn.winfo_children():
-                w.configure(bg=DARK["btn_bg"])
-            for w in self._save_btn.winfo_children():
-                w.configure(fg="#60c8ff")
-
-    def _refresh_tree(self):
-        self.tree.delete(*self.tree.get_children())
-        query = self.search_var.get().lower().strip() if hasattr(self, "search_var") else ""
-        total_real = sum(1 for e in self.entries if e["enabled"] is not None)
-
-        visible = [
-            (i, e) for i, e in enumerate(self.entries)
-            if e["enabled"] is not None and (not query or any(query in str(e.get(f, "")).lower() for f in ("ip", "hostname", "comment")))
-        ]
-
-        col     = getattr(self, "_sort_col_active",  None)
-        reverse = getattr(self, "_sort_col_reverse", False)
-        if col:
-            visible.sort(key=lambda pair: self._sort_key_for(col, pair[1]), reverse=reverse)
-
-        for i, e in visible:
-            tag   = "on" if e["enabled"] else "off"
-            label = "✔ active" if e["enabled"] else "✘ disabled"
-            if current_lang() == "pl":
-                label = "✔ aktywny" if e["enabled"] else "✘ wyłączony"
-            elif current_lang() == "fr":
-                label = "✔ actif" if e["enabled"] else "✘ désactivé"
-            self.tree.insert("", "end", iid=str(i), values=(label, e["ip"], e["hostname"], e["comment"]), tags=(tag,))
-
-        shown = len(visible)
-        self.search_count.config(text=f"{shown} / {total_real}" if query else "")
-
-    def _load(self):
-        self.entries = parse_hosts(HOSTS_PATH)
-        self._sort_state      = {}
-        self._sort_col_active  = None
-        self._sort_col_reverse = False
-        col_keys = {"status": "col_status", "ip": "col_ip", "hostname": "col_hostname", "comment": "col_comment"}
-        for c, key in col_keys.items():
-            try: self.tree.heading(c, text=T(key))
-            except Exception: pass
-        self._refresh_tree()
-        self._update_status()
-
-    def _reload(self):
-        self._load()
-
-    def _update_status(self):
-        real = [e for e in self.entries if e["enabled"] is not None]
-        on   = sum(1 for e in real if e["enabled"])
-        baks = len(list_backups(HOSTS_PATH))
-        off  = len(real) - on
-        self.status_bar.config(text=f"{HOSTS_PATH}   |   {T('status_entries', total=len(real), active=on, disabled=off)}   |   Backups: {baks}")
-
-    def _selected_idx(self):
-        for s in self.tree.selection():
-            idx = int(s)
-            if self.entries[idx]["enabled"] is not None: return idx
-        return None
-
-    def _selected_indices(self):
-        return [int(s) for s in self.tree.selection() if self.entries[int(s)]["enabled"] is not None]
-
-    def _add(self):
-        existing = {e["hostname"].lower() for e in self.entries if e["enabled"] is not None}
-        dlg = EntryDialog(self, existing_hostnames=existing)
-        if dlg.result_list is not None:
-            self.entries.extend(dlg.result_list)
-            self._refresh_tree(); self._update_status(); self._mark_dirty()
-        elif dlg.result:
-            self.entries.append(dlg.result)
-            self._refresh_tree(); self._update_status(); self._mark_dirty()
-
-    def _edit(self):
-        idx = self._selected_idx()
-        if idx is None:
-            DarkDialog.info(self, T("no_sel_title"), T("no_sel_edit"))
+            entry = self.entries[i]
+            if entry["enabled"] is not None and entry["ip"] != "0.0.0.0":
+                entry["ip"] = "0.0.0.0"
+                changed = True
+        if not changed:
             return
-        dlg = EntryDialog(self, self.entries[idx])
-        if dlg.result:
-            self.entries[idx] = dlg.result
-            self._refresh_tree(); self._update_status(); self._mark_dirty()
-
-    def _toggle(self):
-        indices = self._selected_indices()
-        if not indices:
-            DarkDialog.info(self, T("no_sel_title"), T("no_sel_toggle"))
-            return
-        any_off = any(not self.entries[i]["enabled"] for i in indices)
-        for i in indices:
-            self.entries[i]["enabled"] = any_off
-        self._refresh_tree(); self._update_status(); self._mark_dirty()
-
-    def _delete(self):
-        # In raw (notepad) view: delete selected text or current line
-        if getattr(self, "_raw_view_active", False):
-            try:
-                if self._raw_text.tag_ranges("sel"):
-                    self._raw_text.delete("sel.first", "sel.last")
-                    self._raw_on_key()
-                    self._mark_dirty()
-                else:
-                    DarkDialog.info(self, T("no_sel_title"), T("no_sel_raw_delete"))
-            except Exception:
-                pass
-            return
-
-        # Default delete logic for table (Treeview) view
-        indices = self._selected_indices()
-        if not indices:
-            DarkDialog.info(self, T("no_sel_title"), T("no_sel_delete"))
-            return
-        if len(indices) == 1:
-            e = self.entries[indices[0]]
-            q = T("del_confirm_one", ip=e['ip'], hostname=e['hostname'])
-        else:
-            preview = "\n".join(f"{self.entries[i]['ip']}  {self.entries[i]['hostname']}" for i in indices[:10])
-            suffix = T("del_more", n=len(indices)-10) if len(indices) > 10 else ""
-            q = T("del_confirm_many", n=len(indices), preview=preview, suffix=suffix)
-        if not DarkDialog.ask(self, T("del_confirm_title"), q): return
-        for i in sorted(indices, reverse=True):
-            self.entries.pop(i)
-        self._refresh_tree(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty()
 
     def _save(self):
-        if getattr(self, "_raw_view_active", False):
-            import tempfile, os
-            from .core import parse_hosts as _parse_hosts
-            raw_text = self._raw_text.get("1.0", "end-1c")
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".hosts", delete=False) as tf:
-                tf.write(raw_text)
-                tmp_path = tf.name
-            try: self.entries = _parse_hosts(tmp_path)
-            except Exception as ex: DarkDialog.error(self, T("parse_err_title"), str(ex)); return
-            finally:
-                try: os.unlink(tmp_path)
-                except Exception: pass
+        if self._raw_mode:
+            if not self._commit_raw_text():
+                return
 
-        # ── ENTRY LIMIT (> 20 000) ──
         active_count = sum(1 for e in self.entries if e.get("enabled") is True)
-        if active_count > 20000:
-            DarkDialog.error(self, T("save_limit_title"), T("save_limit_msg", n=active_count))
+        if active_count > MAX_ACTIVE_ENTRIES:
+            HOTSDialog.error(self, T("save_limit_title"),
+                             T("save_limit_msg", n=active_count, max=MAX_ACTIVE_ENTRIES))
             return
 
         try:
-            with open(HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f: old_text = f.read()
-        except Exception: old_text = ""
+            with open(HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f:
+                old_text = f.read()
+        except Exception:
+            old_text = ""
         new_text = entries_to_text(self.entries)
 
-        def do_save():
-            self.status_bar.config(text=T("status_saving"))
-            self.update_idletasks()
+        from .dialogs import DiffDialog
+        dlg = DiffDialog(self, old_text, new_text)
+        dlg.exec()
+        if not dlg.confirmed:
+            return
 
-            def bg_save_worker():
-                try:
-                    dns_ok = save_hosts(HOSTS_PATH, self.entries)
-                    self.after(0, lambda: save_success(dns_ok))
-                except PermissionError:
-                    self.after(0, save_permission_error)
-                except Exception as ex:
-                    self.after(0, lambda: DarkDialog.error(self, T("save_err_title"), str(ex)))
-                finally:
-                    self.after(0, self._update_status)
+        self.status_bar.setText(T("status_saving"))
+        self._worker = SaveWorker(HOSTS_PATH, self.entries)
+        self._worker.finished.connect(self._on_save_finished)
+        self._worker.error_msg.connect(self._on_save_error)
+        self._worker.start()
 
-            def save_success(dns_ok):
-                self._mark_clean()
-                dns_line = T("save_dns_ok") if dns_ok else T("save_dns_slow")
-                DarkDialog.info(self, T("save_success_title"), T("save_success_msg", dns_line=dns_line))
+    def _on_save_finished(self, _ok: bool):
+        self._mark_clean()
+        self._update_status()
+        InfoBar.success(
+            title=T("save_success_title"),
+            content=T("save_success_msg"),
+            orient=Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            duration=3000,
+            parent=self,
+        )
 
-            def save_permission_error():
-                DarkDialog.error(self, T("save_perm_title"), T("save_perm_msg"))
-
-            threading.Thread(target=bg_save_worker, daemon=True).start()
-
-        DiffDialog(self, old_text, new_text, on_confirm=do_save)
+    def _on_save_error(self, msg: str):
+        self._update_status()
+        HOTSDialog.error(self, T("save_err_title"), msg)
 
     def _import(self):
-        result = import_hosts_file(self, self.entries)
-        if result is not None:
-            self.entries = result
-            self._refresh_tree(); self._update_status(); self._mark_dirty()
+        path, _ = QFileDialog.getOpenFileName(
+            self, T("import_dialog_title"), "",
+            f"{T('import_filetypes_hosts')} (*.txt *.hosts *);;{T('import_filetypes_all')} (*.*)"
+        )
+        if not path:
+            return
+        try:
+            new_entries, count = import_from_path(path, self.entries)
+        except ValueError as ex:
+            HOTSDialog.info(self, T("import_empty_title"), str(ex))
+            return
+
+        active_after = sum(1 for e in new_entries if e.get("enabled") is True)
+        if active_after > MAX_ACTIVE_ENTRIES:
+            if not HOTSDialog.ask(self, T("import_limit_ask_title"),
+                                  T("import_limit_ask_msg", n=count,
+                                    total=active_after, max=MAX_ACTIVE_ENTRIES)):
+                return
+        else:
+            if not HOTSDialog.ask(self, T("import_confirm_title"),
+                                  T("import_confirm_msg", n=count)):
+                return
+
+        self.entries = new_entries
+        self._refresh_table(); self._update_status(); self._mark_dirty()
 
     def _export(self):
-        selected_indices = self._selected_indices()
-        entries_to_export = [self.entries[i] for i in selected_indices] if selected_indices else self.entries
-        export_count      = len(entries_to_export)
-        total_count       = sum(1 for e in self.entries if e["enabled"] is not None)
-        is_selection      = bool(selected_indices)
-
-        # ── Export options dialog ─────────────────────────────────────────
-        dlg = tk.Toplevel(self)
-        dlg.title(T("btn_export"))
-        dlg.configure(bg=DARK["bg2"])
-        dlg.resizable(False, False)
-        dlg.grab_set()
-        dlg.transient(self)
-
-        tk.Frame(dlg, bg=DARK["accent"], height=4).pack(fill="x")
-
-        tk.Label(dlg, text="📤  " + T("btn_export"),
-                 bg=DARK["bg2"], fg=DARK["fg"],
-                 font=("Segoe UI", 11, "bold")).pack(pady=(16, 6), padx=24, anchor="w")
-
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16)
-
-        # ── Export scope ──────────────────────────────────────────────────
-        scope_frame = tk.Frame(dlg, bg=DARK["bg2"])
-        scope_frame.pack(fill="x", padx=20, pady=(12, 4))
-
-        tk.Label(scope_frame, text=T("export_scope_label"),
-                 bg=DARK["bg2"], fg=DARK["fg2"],
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
-
-        scope_var = tk.StringVar(value="selection" if is_selection else "all")
-
-        rb_all = tk.Radiobutton(
-            scope_frame,
-            text=T("export_scope_all", n=total_count),
-            variable=scope_var, value="all",
-            bg=DARK["bg2"], fg=DARK["fg"],
-            selectcolor=DARK["bg3"],
-            activebackground=DARK["bg2"], activeforeground=DARK["fg"],
-            font=("Segoe UI", 10), cursor="hand2"
+        from .dialogs import ExportOptionsDialog
+        dlg = ExportOptionsDialog(
+            self,
+            total_count  = sum(1 for e in self.entries if e["enabled"] is not None),
+            sel_indices  = self._selected_indices(),
         )
-        rb_all.pack(anchor="w", pady=(4, 1))
-
-        rb_sel_text = T("export_scope_sel", n=export_count) if is_selection else T("export_scope_sel_none")
-        rb_sel = tk.Radiobutton(
-            scope_frame,
-            text=rb_sel_text,
-            variable=scope_var, value="selection",
-            state="normal" if is_selection else "disabled",
-            bg=DARK["bg2"], fg=DARK["fg"] if is_selection else DARK["fg2"],
-            selectcolor=DARK["bg3"],
-            activebackground=DARK["bg2"], activeforeground=DARK["fg"],
-            font=("Segoe UI", 10), cursor="hand2" if is_selection else "arrow"
-        )
-        rb_sel.pack(anchor="w", pady=1)
-
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 0))
-
-        # ── Comments option ───────────────────────────────────────────────
-        comment_frame = tk.Frame(dlg, bg=DARK["bg2"])
-        comment_frame.pack(fill="x", padx=20, pady=(10, 4))
-
-        tk.Label(comment_frame, text=T("export_comments_label"),
-                 bg=DARK["bg2"], fg=DARK["fg2"],
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
-
-        comments_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            comment_frame,
-            text=T("export_comments_include"),
-            variable=comments_var,
-            bg=DARK["bg2"], fg=DARK["fg"],
-            selectcolor=DARK["bg3"],
-            activebackground=DARK["bg2"], activeforeground=DARK["fg"],
-            font=("Segoe UI", 10), cursor="hand2"
-        ).pack(anchor="w", pady=(4, 0))
-
-        tk.Frame(dlg, bg=DARK["border"], height=1).pack(fill="x", padx=16, pady=(10, 0))
-
-        # ── Buttons ───────────────────────────────────────────────────────
-        btn_frame = tk.Frame(dlg, bg=DARK["bg2"])
-        btn_frame.pack(pady=14)
-
-        confirmed = [False]
-
-        def _do_export():
-            confirmed[0] = True
-            dlg.destroy()
-
-        make_btn(btn_frame, "📤", "#ffa060", T("btn_export"), _do_export, accent=True).pack(side="left", padx=6)
-        make_btn(btn_frame, "✖", "#e05050", T("btn_cancel"), dlg.destroy).pack(side="left", padx=6)
-
-        dlg.bind("<Return>", lambda _: _do_export())
-        dlg.bind("<Escape>", lambda _: dlg.destroy())
-
-        dlg.update_idletasks()
-        w = max(dlg.winfo_reqwidth(), 320)
-        h = max(dlg.winfo_reqheight(), 220)
-        x = self.winfo_x() + (self.winfo_width()  - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dlg.geometry(f"{w}x{h}+{x}+{y}")
-
-        dlg.wait_window()
-
-        if not confirmed[0]:
+        dlg.exec()
+        if not dlg.confirmed:
             return
 
-        # ── Perform the export ────────────────────────────────────────────
-        if scope_var.get() == "selection" and is_selection:
-            data = entries_to_export
-        else:
-            data = self.entries
+        entries_to_exp = (
+            [self.entries[i] for i in dlg.sel_indices]
+            if dlg.use_selection and dlg.sel_indices
+            else self.entries
+        )
 
-        include_comments = comments_var.get()
-        export_hosts(self, data, include_comments=include_comments)
+        path, _ = QFileDialog.getSaveFileName(
+            self, T("export_dialog_title"), "",
+            f"{T('export_filetypes_txt')} (*.txt);;"
+            f"{T('export_filetypes_csv')} (*.csv);;"
+            f"{T('export_filetypes_all')} (*.*)"
+        )
+        if not path:
+            return
+
+        try:
+            n = export_to_path(path, entries_to_exp, include_comments=dlg.include_comments)
+            if path.endswith(".csv"):
+                HOTSDialog.info(self, T("export_ok_csv_title"), T("export_ok_csv_msg", path=path))
+            else:
+                HOTSDialog.info(self, T("export_ok_txt_title"), T("export_ok_txt_msg", n=n, path=path))
+        except Exception as ex:
+            HOTSDialog.error(self, T("export_err_title"), str(ex))
 
     def _backups(self):
-        BackupManagerDialog(self, HOSTS_PATH, on_restore=self._load)
+        self.switchTo(self._backup_page)
 
-    def _open_parental_control(self):
-        """Opens the parental control dialog."""
-        ParentalDialog(self)
-
-    def _support(self):
-        """Opens the project support dialog."""
-        SupportDialog(self)
-
-    def _diag_existence(self):
-        selected = self._selected_indices()
-        if not selected:
-            DarkDialog.info(self, T("no_sel_title"), T("no_sel_check"))
+    def _show_context_menu(self, pos: QPoint):
+        item = self.table.itemAt(pos)
+        if not item:
             return
-        to_check = [self.entries[i] for i in selected]
-        DiagnosticsDialog(self, to_check, mode="existence", on_remove=self._remove_by_hostnames)
+        if not self.table.selectedItems():
+            self.table.selectRow(item.row())
 
-    def _diag_malware(self):
-        selected = self._selected_indices()
-        to_check = [self.entries[i] for i in selected] if selected else self.entries
-        DiagnosticsDialog(self, to_check, mode="malware", on_remove=self._remove_by_hostnames)
+        if hasattr(self, "_ctx_menu") and self._ctx_menu is not None:
+            try:
+                QApplication.instance().removeEventFilter(self._ctx_menu)
+                self._ctx_menu.hide()
+                self._ctx_menu.deleteLater()
+            except Exception:
+                pass
+            self._ctx_menu = None
 
-    def _remove_by_hostnames(self, hostnames: set):
-        self.entries = [e for e in self.entries if e["hostname"].lower() not in hostnames]
-        self._refresh_tree(); self._update_status(); self._mark_dirty()
+        global_pos = self.table.viewport().mapToGlobal(pos)
+        self._ctx_menu = HOTSContextMenu(self, [
+            ("☑", "#50c878", T("ctx_select_all"), self._select_all),
+            None,
+            ("✎", DARK['accent'], T("ctx_edit"),    self._edit),
+            ("◑", "#a0a0ff", T("ctx_toggle"),  self._toggle),
+            ("✖", "#e05050", T("ctx_delete"),  self._delete),
+            None,
+            ("⊘", "#ff9050", T("ctx_zero_ip"), self._set_zero_ip),
+        ])
+        self._ctx_menu.popup(global_pos)
+
+    def _select_all(self):
+        self.table.selectAll()
+
+    @staticmethod
+    def _entries_semantically_equal(a: list, b: list) -> bool:
+        if len(a) != len(b):
+            return False
+        for ea, eb in zip(a, b):
+            if ea.get("enabled") is None or eb.get("enabled") is None:
+                if ea.get("enabled") != eb.get("enabled"):
+                    return False
+                if ea.get("raw", "") != eb.get("raw", ""):
+                    return False
+            else:
+                if (ea.get("enabled") != eb.get("enabled")
+                        or ea.get("ip", "") != eb.get("ip", "")
+                        or ea.get("hostname", "") != eb.get("hostname", "")
+                        or ea.get("comment", "") != eb.get("comment", "")):
+                    return False
+        return True
+
+    def _commit_raw_text(self) -> bool:
+        from .core import parse_hosts as _ph
+        import tempfile
+        raw_text = self._raw_editor.toPlainText()
+        fd, tmp = tempfile.mkstemp(suffix=".hosts")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(raw_text)
+            new_entries = _ph(tmp)
+            if not self._entries_semantically_equal(new_entries, self.entries):
+                self.entries = new_entries
+                self._mark_dirty()
+            else:
+                self.entries = new_entries
+            return True
+        except Exception as ex:
+            HOTSDialog.error(self, T("parse_err_title"), T("raw_commit_err_msg", error=str(ex)))
+            return False
+        finally:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+
+    def _raw_view_active(self) -> bool:
+        return self._raw_widget.isVisible()
+
+    def _show_table_view(self):
+        if self._raw_mode:
+            self._commit_raw_text()
+            self._raw_mode = False
+            self._raw_widget.hide()
+            self._table_widget.show()
+            self._toolbar_frame.show()
+            self._refresh_table()
+            self._update_status()
+
+    def _show_raw_view(self):
+        self._table_widget.hide()
+        self._toolbar_frame.hide()
+        self._raw_widget.show()
+        self._raw_mode = True
+        self._populate_raw_view()
+        if self.stackedWidget.currentWidget() is not self._main_widget:
+            self.switchTo(self._main_widget)
+        if self._search_edit.text().strip():
+            self._search_raw_text()
 
     def _repair(self):
-        original_state = [(e.get("ip", ""), e.get("hostname", ""), e.get("comment", ""), e.get("enabled")) for e in self.entries]
+        self._show_table_view()
+
+        original_state = [
+            (e.get("ip", ""), e.get("hostname", ""), e.get("comment", ""), e.get("enabled"))
+            for e in self.entries
+        ]
         fixed_entries = []
         seen_pairs = set()
-        wildcards_fixed = 0; dups_removed = 0; invalid_removed = 0; normalized = 0
+        wildcards_fixed = dups_removed = invalid_removed = normalized = 0
 
         for e in self.entries:
             if e["enabled"] is None:
-                fixed_entries.append(e); continue
-            ip = e["ip"].strip(); host = e["hostname"].strip(); comment = e["comment"].strip()
+                fixed_entries.append(e)
+                continue
+            ip   = e["ip"].strip()
+            host = e["hostname"].strip()
+            comment = e["comment"].strip()
             if not ip or not host or not is_valid_ip(ip):
-                invalid_removed += 1; continue
-
-            # Strip wildcard prefix (*.example.com → example.com)
+                invalid_removed += 1
+                continue
             original_host = host
-            host = re.sub(r"^\*\.?", "", host).lstrip(".")
-            if host != original_host: wildcards_fixed += 1
-            if not host: invalid_removed += 1; continue
-
-            # Normalize hostname to lowercase — tracked by a separate counter
+            while True:
+                stripped_host = re.sub(r"^\*\.?", "", host).lstrip(".")
+                if stripped_host == host:
+                    break
+                host = stripped_host
+            if host != original_host:
+                wildcards_fixed += 1
+            if not host:
+                invalid_removed += 1
+                continue
             host_clean = host.lower().strip()
-            if host_clean != host and host == original_host:
-                # Case-only change (no wildcard involved) — count separately
+            if host_clean != host:
                 normalized += 1
-
-            # Duplicate key includes enabled state to avoid merging active
-            # and disabled entries (different semantics despite same IP+hostname)
             pair_key = (ip.strip(), host_clean, bool(e["enabled"]))
-
             if pair_key in seen_pairs:
                 dups_removed += 1
                 if comment:
@@ -1121,35 +1594,43 @@ class HostsEditor(tk.Tk):
                                 and prev["ip"].strip() == ip.strip()
                                 and prev["hostname"].lower() == host_clean):
                             if prev["comment"]:
-                                if comment not in prev["comment"]: prev["comment"] += f" | {comment}"
-                            else: prev["comment"] = comment
+                                if comment not in prev["comment"]:
+                                    prev["comment"] += f" | {comment}"
+                            else:
+                                prev["comment"] = comment
                             break
                 continue
             seen_pairs.add(pair_key)
-            fixed_entries.append({"enabled": e["enabled"], "ip": ip, "hostname": host_clean, "comment": comment, "raw": ""})
+            fixed_entries.append({
+                "enabled": e["enabled"], "ip": ip,
+                "hostname": host_clean, "comment": comment,
+                "raw": e.get("raw", ""),
+            })
 
-        new_state = [(e.get("ip", ""), e.get("hostname", ""), e.get("comment", ""), e.get("enabled")) for e in fixed_entries]
+        new_state = [
+            (e.get("ip", ""), e.get("hostname", ""), e.get("comment", ""), e.get("enabled"))
+            for e in fixed_entries
+        ]
         if new_state == original_state:
-            DarkDialog.info(self, T("repair_no_changes_title"), T("repair_no_changes_msg"))
+            HOTSDialog.info(self, T("repair_no_changes_title"), T("repair_no_changes_msg"))
             return
 
         self.entries = fixed_entries
-        self._refresh_tree(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty()
 
         report = [T("repair_done_header")]
-        if wildcards_fixed: report.append(T("repair_wildcards",   n=wildcards_fixed))
-        if dups_removed:    report.append(T("repair_dups",        n=dups_removed))
-        if invalid_removed: report.append(T("repair_invalid",     n=invalid_removed))
-        if normalized:      report.append(T("repair_normalized",  n=normalized))
-        DarkDialog.info(self, T("repair_done_title"), "\n".join(report))
+        if wildcards_fixed: report.append(T("repair_wildcards",  n=wildcards_fixed))
+        if dups_removed:    report.append(T("repair_dups",       n=dups_removed))
+        if invalid_removed: report.append(T("repair_invalid",    n=invalid_removed))
+        if normalized:      report.append(T("repair_normalized", n=normalized))
+        HOTSDialog.info(self, T("repair_done_title"), "\n".join(report))
 
     def _restore_default(self):
-        if not DarkDialog.ask(self, T("restore_ask_title"), T("restore_ask_msg")): return
-
-        # Default entries — without the historical header boilerplate
+        if not HOTSDialog.ask(self, T("restore_ask_title"), T("restore_ask_msg")):
+            return
         default_entries = [
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
-             "raw": "# Copyright (c) 1993-2014 Microsoft Corp."},
+             "raw": "# Copyright (c) 1993-2009 Microsoft Corp."},
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
              "raw": "#"},
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
@@ -1157,19 +1638,195 @@ class HostsEditor(tk.Tk):
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
              "raw": "#"},
             {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# This file contains the mappings of IP addresses to host names. Each"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# entry should be kept on an individual line. The IP address should"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# be placed in the first column followed by the corresponding host name."},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# The IP address and the host name should be separated by at least one"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# space."},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# Additionally, comments (such as these) may be inserted on individual"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# lines or following the machine name denoted by a '#' symbol."},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "# For example:"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#      102.54.94.97     rhino.acme.com          # source server"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": "#       38.25.63.10     x.acme.com              # x client host"},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
+             "raw": ""},
+            {"enabled": None, "ip": "", "hostname": "", "comment": "",
              "raw": "# localhost name resolution is handled within DNS itself."},
-            {"enabled": True,  "ip": "127.0.0.1", "hostname": "localhost", "comment": "", "raw": ""},
-            {"enabled": True,  "ip": "::1",        "hostname": "localhost", "comment": "", "raw": ""},
+            {"enabled": False, "ip": "127.0.0.1", "hostname": "localhost", "comment": "", "raw": ""},
+            {"enabled": False, "ip": "::1",        "hostname": "localhost", "comment": "", "raw": ""},
         ]
-
         try:
-            # save_hosts() handles: write via temp file + cmd copy,
-            # backup rotation (max 10) and DNS flush — consistent with the rest of the app
-            dns_ok = save_hosts(HOSTS_PATH, default_entries)
+            save_hosts(HOSTS_PATH, default_entries)
         except Exception as ex:
-            DarkDialog.error(self, T("save_err_title"), str(ex))
+            HOTSDialog.error(self, T("save_err_title"), str(ex))
+            return
+        self._load()
+        self.switchTo(self._main_widget)
+        self._show_table_view()
+        HOTSDialog.info(self, T("restore_done_title"), T("restore_done_msg"))
+
+    def _diag_existence(self):
+        selected = self._selected_indices()
+        if not selected:
+            HOTSDialog.info(self, T("no_sel_title"), T("no_sel_check"))
+            self.switchTo(self._main_widget)
+            return
+        self._diagnostics_page.set_context(
+            [self.entries[i] for i in selected], mode="existence",
+            on_remove=self._remove_by_hostnames)
+        self.switchTo(self._diagnostics_page)
+
+    def _diag_malware(self):
+        selected = self._selected_indices()
+        to_check = [self.entries[i] for i in selected] if selected else self.entries
+        self._diagnostics_page.set_context(
+            to_check, mode="malware", on_remove=self._remove_by_hostnames)
+        self.switchTo(self._diagnostics_page)
+
+    def _remove_by_hostnames(self, hostnames: set):
+        self.entries = [e for e in self.entries if e["hostname"].lower() not in hostnames]
+        self._refresh_table(); self._update_status(); self._mark_dirty()
+
+    def _open_parental_control(self):
+        self.switchTo(self._parental_page)
+
+    def _open_privacy(self):
+        self.switchTo(self._privacy_page)
+
+    def _support(self):
+        self.switchTo(self._support_page)
+
+    def _about(self):
+        self.switchTo(self._about_page)
+
+    def _change_language(self):
+        from .dialogs import LanguageDialog
+        dlg = LanguageDialog(self)
+        dlg.exec()
+        if dlg.chosen and dlg.chosen != current_lang():
+            set_lang(dlg.chosen)
+            self._save_settings_merged(language=dlg.chosen)
+            HOTSDialog.info(self, T("lang_title"), T("lang_restart_msg"))
+
+    def _change_accent_color(self):
+        from .dialogs import AccentColorDialog
+        current_accent = self._settings.get("accent_color", "gold")
+        current_theme = self._settings.get("theme", "dark")
+        dlg = AccentColorDialog(self, current_accent=current_accent, current_theme=current_theme)
+        dlg.exec()
+        if dlg.chosen_accent is None and dlg.chosen_theme is None:
+            return
+        changed = (
+            (dlg.chosen_accent and dlg.chosen_accent != current_accent) or
+            (dlg.chosen_theme and dlg.chosen_theme != current_theme)
+        )
+        if changed:
+            self._save_settings_merged(
+                accent_color=dlg.chosen_accent or current_accent,
+                theme=dlg.chosen_theme or current_theme,
+            )
+            if HOTSDialog.restart_prompt(self, T("app_title"), T("app_restart_msg")):
+                self._restart_app()
+
+    def _restart_app(self):
+        self._disconnect_bg_signals()
+        if not self.close():
             return
 
-        self._load()
-        dns_line = T("save_dns_ok") if dns_ok else T("save_dns_slow")
-        DarkDialog.info(self, T("restore_done_title"), T("restore_done_msg") + f"\n{dns_line}")
+        os.environ.pop("_MEIPASS2", None)
+
+        try:
+            main_mod = sys.modules.get("__main__")
+            release_fn = getattr(main_mod, "release_single_instance_lock", None)
+            if callable(release_fn):
+                release_fn()
+        except Exception:
+            pass
+
+        python = sys.executable
+        args = sys.argv[1:]
+        if getattr(sys, "frozen", False):
+            ok = QProcess.startDetached(python, args)
+        else:
+            pkg = (__package__ or "").split(".")[0]
+            if pkg:
+                ok = QProcess.startDetached(python, ["-m", pkg] + args)
+            else:
+                ok = QProcess.startDetached(python, sys.argv)
+        if not ok:
+            HOTSDialog.error(self, T("app_title"), T("app_restart_fail_msg"))
+            return
+        QApplication.quit()
+
+    def _manage_password(self):
+        from .__main__ import _reg_get_password, _reg_set_password
+        from .dialogs import SetPasswordDialog
+        current_hash = _reg_get_password()
+
+        def on_save(new_hash: str):
+            _reg_set_password(new_hash)
+            self._refresh_pass_nav()
+
+        dlg = SetPasswordDialog(self, current_hash, on_save)
+        dlg.exec()
+
+    def _refresh_pass_nav(self):
+        from .__main__ import _reg_get_password
+        has = bool(_reg_get_password())
+        try:
+            item = self.navigationInterface.widget("password")
+            if item:
+                item.setToolTip(T("opt_pass_on") if has else T("opt_pass_off"))
+        except Exception:
+            pass
+
+    def _disconnect_bg_signals(self):
+        for sig in self._bg_signal_objs:
+            try:
+                sig.done.disconnect()
+            except Exception:
+                pass
+        self._bg_signal_objs.clear()
+
+        try:
+            self._privacy_page.disconnect_bg_signals()
+        except Exception as e:
+            print(f"disconnect_bg_signals (privacy_page) warning: {e}")
+
+    def _save_settings_merged(self, **updates):
+        fresh = load_settings()
+        fresh.update(updates)
+        self._settings = fresh
+        save_settings(fresh)
+
+    def _on_close_event(self, event):
+        if self._dirty:
+            if not HOTSDialog.ask(self, T("dlg_unsaved_title"), T("dlg_unsaved_msg")):
+                event.ignore()
+                return
+        self._disconnect_bg_signals()
+        geo = self.geometry()
+        col_widths = ",".join(str(self.table.columnWidth(i)) for i in range(3))
+        self._save_settings_merged(
+            geometry=f"{geo.width()}x{geo.height()}+{geo.x()}+{geo.y()}",
+            language=current_lang(),
+            table_col_widths=col_widths,
+            table_sort_col=self._sort_col_active,
+            table_sort_reverse="1" if self._sort_col_reverse else "0",
+        )
+        event.accept()

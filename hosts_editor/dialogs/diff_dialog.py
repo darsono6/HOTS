@@ -1,128 +1,115 @@
-"""
-Diff preview dialog shown before saving the hosts file.
-To change the diff viewer appearance, edit this file.
-"""
-
 import difflib
-import tkinter as tk
-from tkinter import ttk
+
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget, QPlainTextEdit
+from PySide6.QtGui import QTextCharFormat, QColor, QFont, QSyntaxHighlighter
+
+from qfluentwidgets import FluentIcon as FIF
 
 from ..constants import DARK
-from ..widgets import make_btn, center_on_parent
+from ..widgets_qt import HOTSDialog, HOTSButton, h_separator
 from ..i18n import T
 
 
-class DiffDialog(tk.Toplevel):
-    """Shows the differences between the current file and the new version before saving."""
+class _DiffHighlighter(QSyntaxHighlighter):
+    def __init__(self, doc, has_diff: bool = True):
+        super().__init__(doc)
+        self._has_diff = has_diff
+        self._add = QTextCharFormat()
+        self._add.setForeground(QColor(DARK["diff_add_fg"]))
+        self._add.setBackground(QColor(DARK["diff_add"]))
 
-    def __init__(self, parent, old_text: str, new_text: str, on_confirm):
-        super().__init__(parent)
-        self.title(T("diff_title"))
-        self.configure(bg=DARK["bg"])
-        self.resizable(True, True)
-        self.on_confirm = on_confirm
+        self._del = QTextCharFormat()
+        self._del.setForeground(QColor(DARK["diff_del_fg"]))
+        self._del.setBackground(QColor(DARK["diff_del"]))
 
-        hdr = tk.Frame(self, bg=DARK["bg2"],
-                       highlightthickness=1, highlightbackground=DARK["border"])
-        hdr.pack(fill="x")
-        tk.Label(hdr, text=T("diff_header"), bg=DARK["bg2"], fg=DARK["fg"],
-                 font=("Segoe UI", 10, "bold")).pack(side="left", padx=14, pady=8)
-        for color, key in ((DARK["diff_add_fg"], "diff_added"),
-                           (DARK["diff_del_fg"], "diff_removed")):
-            tk.Label(hdr, text=T(key), bg=DARK["bg2"], fg=color,
-                     font=("Segoe UI", 9)).pack(side="left")
+        self._hdr = QTextCharFormat()
+        self._hdr.setForeground(QColor(DARK["fg2"]))
+        self._hdr.setBackground(QColor(DARK["bg3"]))
 
-        txt_frame = tk.Frame(self, bg=DARK["bg"])
-        txt_frame.pack(fill="both", expand=True, padx=8, pady=(6, 0))
+        self._ctx = QTextCharFormat()
+        self._ctx.setForeground(QColor(DARK["fg2"]))
 
-        self.text = tk.Text(
-            txt_frame,
-            bg=DARK["bg2"], fg=DARK["fg"],
-            font=("Cascadia Code", 9),
-            relief="flat", bd=0,
-            state="disabled",
-            wrap="none",
-            selectbackground=DARK["sel_bg"],
-            insertbackground=DARK["fg"],
-        )
+    def highlightBlock(self, text: str):
+        block_no = self.currentBlock().blockNumber()
+        if (self._has_diff and block_no < 2) or text.startswith("@@"):
+            self.setFormat(0, len(text), self._hdr)
+        elif text.startswith("+"):
+            self.setFormat(0, len(text), self._add)
+        elif text.startswith("-"):
+            self.setFormat(0, len(text), self._del)
+        elif text.startswith(" "):
+            self.setFormat(0, len(text), self._ctx)
 
-        # ── SCROLLBAR STYLING AND CREATION (SWITCHED TO TTK) ─────────────
-        hsb_style = ttk.Style()
-        hsb_style.configure("Dark.Horizontal.TScrollbar",
-                             background=DARK["bg3"], 
-                             troughcolor=DARK["bg"],
-                             bordercolor=DARK["bg"], 
-                             arrowcolor=DARK["fg2"])
-        hsb_style.map("Dark.Horizontal.TScrollbar",
-                       background=[("active", DARK["accent"]), ("pressed", DARK["accent"])])
 
-        xsb = ttk.Scrollbar(txt_frame, orient="horizontal",
-                            style="Dark.Horizontal.TScrollbar", command=self.text.xview)
-        ysb = ttk.Scrollbar(txt_frame, orient="vertical",
-                            command=self.text.yview)
-        # ─────────────────────────────────────────────────────────────────
+class DiffDialog(HOTSDialog):
+    def __init__(self, parent, old_text: str, new_text: str):
+        super().__init__(parent, title=T("diff_title"), min_width=720, min_height=480)
+        self.confirmed = False
 
-        self.text.configure(xscrollcommand=xsb.set, yscrollcommand=ysb.set)
-        self.text.grid(row=0, column=0, sticky="nsew")
-        ysb.grid(row=0, column=1, sticky="ns")
-        xsb.grid(row=1, column=0, sticky="ew")
-        txt_frame.rowconfigure(0, weight=1)
-        txt_frame.columnconfigure(0, weight=1)
+        old_lines = old_text.splitlines()
+        new_lines = new_text.splitlines()
+        self._diff_lines = list(difflib.unified_diff(
+            old_lines, new_lines, fromfile="current_hosts", tofile="new_hosts", lineterm=""
+        ))
 
-        self.text.tag_configure("add", foreground=DARK["diff_add_fg"],
-                                background=DARK["diff_add"])
-        self.text.tag_configure("del", foreground=DARK["diff_del_fg"],
-                                background=DARK["diff_del"])
-        self.text.tag_configure("hdr", foreground="#888888",
-                                background=DARK["bg3"])
-        self.text.tag_configure("ctx", foreground=DARK["fg2"])
+        self._build()
+        self.center_on_parent()
 
-        self._fill_diff(old_text, new_text)
+    def _build(self):
+        cl = self.body_layout
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
 
-        adds = sum(1 for l in self._diff_lines if l.startswith("+") and not l.startswith("+++"))
-        dels = sum(1 for l in self._diff_lines if l.startswith("-") and not l.startswith("---"))
-        stat_txt = T("diff_no_changes") if adds + dels == 0 else T("diff_stat", adds=adds, dels=dels)
-        tk.Label(hdr, text=stat_txt, bg=DARK["bg2"], fg=DARK["fg2"],
-                 font=("Segoe UI", 9)).pack(side="left", padx=16)
+        hdr = QWidget()
+        hdr.setStyleSheet(f"background: {DARK['panel_bg']};")
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(16, 10, 16, 10)
+
+        content_lines = self._diff_lines[2:] if self._diff_lines else []
+        adds = sum(1 for l in content_lines if l.startswith("+"))
+        dels = sum(1 for l in content_lines if l.startswith("-"))
+        stat_txt = T("diff_stat", adds=adds, dels=dels)
+
+        stat = QLabel(stat_txt)
+        stat.setStyleSheet(f"color: {DARK['fg2']}; background: transparent; margin-right: 8px;")
+        hdr_lay.addWidget(stat)
 
         save_label = T("diff_save_anyway") if adds + dels == 0 else T("diff_save")
-        make_btn(hdr, "💾", "#60c8ff", save_label,
-                 self._confirm, accent=True).pack(side="right", padx=6, pady=4)
-        make_btn(hdr, "✖", "#e05050", T("diff_cancel"),
-                 self.destroy).pack(side="right", padx=3, pady=4)
+        save_btn = HOTSButton(FIF.SAVE, "#ffffff", save_label, accent=True)
+        save_btn.clicked.connect(self._confirm)
+        hdr_lay.addWidget(save_btn)
 
-        self.transient(parent)
-        self.grab_set()
-        center_on_parent(self, parent, min_w=860, min_h=500)
+        cancel_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("diff_cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        hdr_lay.addWidget(cancel_btn)
 
-    def _fill_diff(self, old: str, new: str):
-        old_lines = old.splitlines(keepends=True)
-        new_lines = new.splitlines(keepends=True)
-        self._diff_lines = list(difflib.unified_diff(
-            old_lines, new_lines,
-            fromfile=T("diff_fromfile"), tofile=T("diff_tofile"),
-            lineterm=""))
+        common_w = max(
+            save_btn.layout().sizeHint().width(),
+            cancel_btn.layout().sizeHint().width(),
+        ) + 8
+        save_btn.setFixedWidth(common_w)
+        cancel_btn.setFixedWidth(common_w)
 
-        self.text.configure(state="normal")
-        self.text.delete("1.0", "end")
+        cl.addWidget(hdr)
+        cl.addWidget(h_separator())
+
+        self._text = QPlainTextEdit()
+        self._text.setReadOnly(True)
+        self._text.setFont(QFont("Cascadia Code", 9))
+        self._text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self._text.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {DARK['table_bg']}; color: {DARK['fg']}; "
+            f"border: none; padding: 10px; }}"
+        )
+        self._hl = _DiffHighlighter(self._text.document(), has_diff=bool(self._diff_lines))
 
         if not self._diff_lines:
-            self.text.insert("end", T("diff_no_changes_body"), "ctx")
+            self._text.setPlainText(T("diff_no_changes_body"))
         else:
-            for line in self._diff_lines:
-                s = line.rstrip("\n")
-                if s.startswith("+++") or s.startswith("---") or s.startswith("@@"):
-                    tag = "hdr"
-                elif s.startswith("+"):
-                    tag = "add"
-                elif s.startswith("-"):
-                    tag = "del"
-                else:
-                    tag = "ctx"
-                self.text.insert("end", s + "\n", tag)
+            self._text.setPlainText("\n".join(self._diff_lines))
 
-        self.text.configure(state="disabled")
+        cl.addWidget(self._text, 1)
 
     def _confirm(self):
-        self.destroy()
-        self.on_confirm()
+        self.confirmed = True
+        self.accept()
