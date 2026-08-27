@@ -28,6 +28,7 @@ jobs:
       - name: Build with Nuitka
         run: |
           python -m nuitka --standalone --msvc=latest --windows-console-mode=disable `
+            --assume-yes-for-downloads `
             --windows-icon-from-ico="icon.ico" `
             --output-filename="HOTS Hosts.exe" `
             --output-dir=dist `
