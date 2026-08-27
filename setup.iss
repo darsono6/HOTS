@@ -40,9 +40,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; Nuitka with --output-dir=dist and standalone creates the folder:
 ; dist\hosts_editor_launcher.dist\  (name comes from the .pyw file)
-; If your folder is named differently, adjust the path below.
-Source: "hosts_editor_launcher.dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "hosts_editor_launcher.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\hosts_editor_launcher.dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\hosts_editor_launcher.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "hots_uninstall_cleanup.cmd"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
