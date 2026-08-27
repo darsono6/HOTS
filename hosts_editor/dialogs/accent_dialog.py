@@ -1,11 +1,11 @@
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QButtonGroup, QPushButton, QRadioButton
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QButtonGroup, QPushButton, QRadioButton, QCheckBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from qfluentwidgets import FluentIcon as FIF, IconWidget
 
 from ..constants import DARK, ACCENT_PRESETS_DARK, ACCENT_PRESETS_LIGHT, hex_to_rgb
-from ..widgets_qt import HOTSDialog, HOTSButton, h_separator
+from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, colored_svg_icon
 from ..i18n import T
 
 
@@ -47,12 +47,15 @@ class AccentColorDialog(HOTSDialog):
         "blue":  "acc_blue",
     }
 
-    def __init__(self, parent=None, current_accent: str = "gold", current_theme: str = "dark"):
+    def __init__(self, parent=None, current_accent: str = "gold", current_theme: str = "dark",
+                 current_table_text_accent: bool = False):
         super().__init__(parent, T("app_title"), min_width=380, min_height=300)
-        self.chosen_accent = current_accent
-        self.chosen_theme = current_theme
+        self.chosen_accent = None
+        self.chosen_theme = None
+        self.chosen_table_text_accent = None
         self._current_accent = current_accent
         self._current_theme = current_theme
+        self._current_table_text_accent = current_table_text_accent
         self._theme_buttons = {}
         self._accent_buttons = {}
         self._build()
@@ -106,6 +109,17 @@ class AccentColorDialog(HOTSDialog):
         cl.addWidget(self._swatch_card)
         self._rebuild_swatches(self._current_theme, keep_selection=True)
 
+        cl.addSpacing(4)
+        self._table_text_cb = QCheckBox(T("acc_table_text_accent"))
+        self._table_text_cb.setChecked(self._current_table_text_accent)
+        self._table_text_cb.setStyleSheet(
+            f"QCheckBox {{ color: {DARK['fg']}; background: transparent; spacing: 10px; font-size: 9pt; padding: 2px 0px; }}\n"
+            f"QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
+            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
+            f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
+        )
+        cl.addWidget(self._table_text_cb)
+
         cl.addStretch()
         cl.addWidget(h_separator())
 
@@ -155,7 +169,7 @@ class AccentColorDialog(HOTSDialog):
             info["label"].setStyleSheet(
                 "color: #ffffff; font-size: 9.5pt; font-weight: 600; background: transparent; border: none;"
             )
-            info["icon_widget"].setIcon(info["icon_fif"].icon(color=QColor("#ffffff")))
+            info["icon_widget"].setIcon(colored_svg_icon(info["icon_fif"], QColor("#ffffff"), sizes=(15,)))
         else:
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: transparent; border: none; border-radius: 8px; }}"
@@ -164,7 +178,7 @@ class AccentColorDialog(HOTSDialog):
             info["label"].setStyleSheet(
                 f"color: {DARK['fg2']}; font-size: 9.5pt; background: transparent; border: none;"
             )
-            info["icon_widget"].setIcon(info["icon_fif"].icon(color=QColor(DARK["fg2"])))
+            info["icon_widget"].setIcon(colored_svg_icon(info["icon_fif"], QColor(DARK["fg2"]), sizes=(15,)))
 
     def _select_theme(self, selected_key: str):
         if selected_key == self._current_theme:
@@ -173,7 +187,6 @@ class AccentColorDialog(HOTSDialog):
             btn.setChecked(info["key"] == selected_key)
             self._style_theme_button(btn)
         self._current_theme = selected_key
-        self.chosen_theme = selected_key
         self._rebuild_swatches(selected_key, keep_selection=True)
 
     def _rebuild_swatches(self, theme_key: str, keep_selection: bool = True):
@@ -210,9 +223,9 @@ class AccentColorDialog(HOTSDialog):
             dot.setStyleSheet(
                 f"QRadioButton {{ background: transparent; }}"
                 f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; "
-                f"border-radius: 7px; background: {DARK['indicator_bg']}; }}"
-                f"QRadioButton::indicator:hover {{ border: 1px solid {DARK['accent']}; }}"
-                f"QRadioButton::indicator:checked {{ background: transparent; border: 4px solid {DARK['accent']}; }}"
+                f"border-radius: 4px; background: {DARK['indicator_bg']}; }}"
+                f"QRadioButton::indicator:hover {{ border: 1px solid rgb({r},{g},{b}); }}"
+                f"QRadioButton::indicator:checked {{ background: rgb({r},{g},{b}); border: 1px solid rgb({r},{g},{b}); }}"
             )
             dot.setChecked(key == selected)
 
@@ -260,4 +273,5 @@ class AccentColorDialog(HOTSDialog):
             if btn.isChecked():
                 self.chosen_accent = key
                 break
+        self.chosen_table_text_accent = self._table_text_cb.isChecked()
         self.accept()

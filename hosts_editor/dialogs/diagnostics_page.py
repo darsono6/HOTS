@@ -18,8 +18,9 @@ from qfluentwidgets import FluentIcon as FIF, IconWidget
 
 from ..constants import DARK, accent_rgba
 from ..core import dns_lookup_external, has_internet_connection
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, HOTSContextMenu, h_separator
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, HOTSContextMenu, attach_fluent_table_tip, attach_fluent_tip, colored_svg_icon
 from ..i18n import T
+from ..bg_tasks import start_bg_thread, register_wakeup, is_shutting_down
 
 from ._diagnostics_shared import (
     _Emitter,
@@ -56,21 +57,25 @@ class DiagnosticsPage(HOTSPage):
         self.mode       = "existence"
         self.entries    = []
         self._on_remove = None
+        self._on_remove_exact = None
         self._run_id    = 0
         self._stop_event = threading.Event()
         self._ignored_hosts = load_ignored_hosts()
         self._ctx_menu  = None
-        self._emitter   = _Emitter()
+        self._emitter   = _Emitter(self)
         self._emitter.row_ready.connect(self._add_row)
         self._emitter.progress.connect(self._update_progress)
         self._emitter.done.connect(self._scan_done)
 
-    def set_context(self, entries, mode, on_remove=None):
+        register_wakeup(self._stop_event.set)
+
+    def set_context(self, entries, mode, on_remove=None, on_remove_exact=None):
         self._stop_event.set()
         self._run_id += 1
         self.mode       = mode
         self.entries    = entries
         self._on_remove = on_remove
+        self._on_remove_exact = on_remove_exact
         title_key = "diag_title_existence" if mode == "existence" else "diag_title_malware"
         self.set_title(T(title_key))
         self._rebuild()
@@ -86,25 +91,32 @@ class DiagnosticsPage(HOTSPage):
         self._clear_content()
         self._build()
 
+    def _card_style(self) -> str:
+        return (f"background: {DARK['panel_bg']}; "
+                f"border: 1px solid {DARK['border_faint']}; border-radius: 6px;")
+
     def _build(self):
         cl = self.content_layout
+        cl.setContentsMargins(12, 10, 12, 10)
+        cl.setSpacing(6)
 
         hdr = QWidget()
-        hdr.setStyleSheet(f"background: {DARK['panel_bg']}; border-bottom: 1px solid {DARK['border_faint']};")
+        hdr.setStyleSheet(self._card_style())
         hdr_lay = QHBoxLayout(hdr)
-        hdr_lay.setContentsMargins(12, 8, 8, 8)
+        hdr_lay.setContentsMargins(16, 14, 16, 14)
+        hdr_lay.setSpacing(10)
 
         icon_fif = FIF.SEARCH if self.mode == "existence" else FIF.CERTIFICATE
         ico_lbl = IconWidget(icon_fif)
         ico_lbl.setFixedSize(20, 20)
-        ico_lbl.setIcon(icon_fif.icon(color=QColor(DARK["accent"])))
+        ico_lbl.setIcon(colored_svg_icon(icon_fif, QColor(DARK["accent"]), sizes=(20,)))
         hdr_lay.addWidget(ico_lbl, 0, Qt.AlignVCenter)
 
         n = len([e for e in self.entries if e.get("enabled") is True])
         desc_key = "diag_desc_existence" if self.mode == "existence" else "diag_desc_malware"
         desc = QLabel(T(desc_key))
         desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent;")
+        desc.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent; border: none;")
         hdr_lay.addWidget(desc, 1)
 
         self._run_btn = HOTSButton(FIF.PLAY, "#ffffff", T("diag_btn_run"), accent=True)
@@ -112,23 +124,25 @@ class DiagnosticsPage(HOTSPage):
         self._run_btn.clicked.connect(self._run)
         hdr_lay.addWidget(self._run_btn, 0, Qt.AlignVCenter)
 
-        self._stop_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("diag_btn_stop"))
-        self._stop_btn.fit_to_content()
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._stop)
-        hdr_lay.addWidget(self._stop_btn, 0, Qt.AlignVCenter)
+        self._stop_btn = None
+        if self.mode == "existence":
+            self._stop_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("diag_btn_stop"))
+            self._stop_btn.fit_to_content()
+            self._stop_btn.setEnabled(False)
+            self._stop_btn.clicked.connect(self._stop)
+            hdr_lay.addWidget(self._stop_btn, 0, Qt.AlignVCenter)
         cl.addWidget(hdr)
 
         prog_w = QWidget()
-        prog_w.setStyleSheet("background: transparent;")
+        prog_w.setStyleSheet(self._card_style())
         prog_lay = QHBoxLayout(prog_w)
-        prog_lay.setContentsMargins(12, 6, 12, 6)
+        prog_lay.setContentsMargins(16, 10, 16, 10)
         self._prog_lbl = QLabel(T("diag_click_to_start"))
-        self._prog_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent;")
+        self._prog_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent; border: none;")
         prog_lay.addWidget(self._prog_lbl)
         prog_lay.addStretch()
-        self._prog_count = QLabel(T("diag_scan_count", n=n))
-        self._prog_count.setStyleSheet(f"color: {DARK['accent']}; font-size: 9pt; font-weight: 600; background: transparent;")
+        self._prog_count = QLabel(T("diag_scan_count_all" if self.mode == "malware" else "diag_scan_count", n=n))
+        self._prog_count.setStyleSheet(f"color: {DARK['accent']}; font-size: 9pt; font-weight: 600; background: transparent; border: none;")
         prog_lay.addWidget(self._prog_count)
         cl.addWidget(prog_w)
 
@@ -139,6 +153,12 @@ class DiagnosticsPage(HOTSPage):
             headers = [T("diag_col_risk"), T("diag_col_hostname"), T("diag_col_ip"), T("diag_col_reason")]
             widths  = [100, 240, 140, 220]
 
+        table_card = QWidget()
+        table_card.setStyleSheet(self._card_style())
+        table_card_lay = QVBoxLayout(table_card)
+        table_card_lay.setContentsMargins(6, 6, 6, 6)
+        table_card_lay.setSpacing(0)
+
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(headers)
@@ -146,6 +166,10 @@ class DiagnosticsPage(HOTSPage):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         if self.mode == "malware":
             self.table.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table.customContextMenuRequested.connect(self._show_table_context_menu)
@@ -158,18 +182,68 @@ class DiagnosticsPage(HOTSPage):
 
         self.table.setStyleSheet(
             f"QTableWidget {{ background-color: transparent; color: {DARK['fg']}; "
-            f"border: none; gridline-color: {DARK['grid_line']}; }}"
+            f"border: none; border-radius: 6px; gridline-color: {DARK['grid_line']}; }}"
             f"QTableWidget::item {{ background-color: transparent; }}"
             f"QTableWidget::item:selected {{ background-color: {accent_rgba(0.16)}; color: {DARK['fg']}; }}"
             f"QHeaderView::section {{ background-color: {DARK['panel_bg_alt']}; color: {DARK['fg2']}; "
             f"border: none; border-bottom: 1px solid {DARK['border_soft2']}; padding: 6px; }}"
+            "QScrollBar:vertical {"
+            "    background: transparent;"
+            "    width: 14px;"
+            "    border: none;"
+            "    margin: 2px 2px 2px 0;"
+            "}"
+            "QScrollBar:horizontal {"
+            "    background: transparent;"
+            "    height: 14px;"
+            "    border: none;"
+            "    margin: 0 2px 2px 2px;"
+            "}"
+            f"QScrollBar::handle:vertical {{"
+            f"    background: {DARK['scrollbar_handle']};"
+            f"    border-radius: 3px;"
+            f"    min-height: 32px;"
+            f"    margin: 0 5px;"
+            f"}}"
+            f"QScrollBar::handle:horizontal {{"
+            f"    background: {DARK['scrollbar_handle']};"
+            f"    border-radius: 3px;"
+            f"    min-width: 32px;"
+            f"    margin: 5px 0;"
+            f"}}"
+            f"QScrollBar::handle:vertical:hover {{"
+            f"    background: {accent_rgba(0.70)};"
+            f"    border-radius: 4px;"
+            f"    margin: 0 2px;"
+            f"}}"
+            f"QScrollBar::handle:horizontal:hover {{"
+            f"    background: {accent_rgba(0.70)};"
+            f"    border-radius: 4px;"
+            f"    margin: 2px 0;"
+            f"}}"
+            f"QScrollBar::handle:vertical:pressed,"
+            f"QScrollBar::handle:horizontal:pressed {{"
+            f"    background: {accent_rgba(0.95)};"
+            f"}}"
+            f"QScrollBar:vertical:hover,"
+            f"QScrollBar:horizontal:hover {{"
+            f"    background: {DARK['scrollbar_track_hover']};"
+            f"}}"
+            "QScrollBar::add-line, QScrollBar::sub-line {"
+            "    width: 0; height: 0; background: none; border: none;"
+            "}"
+            "QScrollBar::add-page, QScrollBar::sub-page {"
+            "    background: none;"
+            "}"
         )
-        cl.addWidget(self.table, 1)
+        table_card_lay.addWidget(self.table)
+        cl.addWidget(table_card, 1)
+        attach_fluent_table_tip(self.table)
 
         act = QWidget()
-        act.setStyleSheet(f"background: {DARK['panel_bg']};")
+        act.setStyleSheet(self._card_style())
         act_lay = QHBoxLayout(act)
-        act_lay.setContentsMargins(8, 6, 8, 6)
+        act_lay.setContentsMargins(14, 10, 14, 10)
 
         if self.mode == "existence":
             del_inactive_btn = HOTSButton(FIF.DELETE, "#f0c040", T("diag_btn_del_inactive"))
@@ -185,7 +259,6 @@ class DiagnosticsPage(HOTSPage):
         act_lay.addWidget(del_sel_btn)
         act_lay.addStretch()
 
-        cl.addWidget(h_separator())
         cl.addWidget(act)
 
         self._status = QLabel("")
@@ -200,11 +273,12 @@ class DiagnosticsPage(HOTSPage):
         self._stop_event.clear()
         self._run_btn.setEnabled(False)
         self._run_btn.set_accent(False)
-        self._stop_btn.setEnabled(True)
+        if self._stop_btn is not None:
+            self._stop_btn.setEnabled(True)
         self.table.setRowCount(0)
         real = [dict(e) for e in self.entries if e["enabled"] is True]
         run_id = self._run_id
-        threading.Thread(target=self._scan, args=(real, run_id), daemon=True).start()
+        start_bg_thread(self._scan, real, run_id)
 
     def _stop(self):
         self._stop_event.set()
@@ -311,7 +385,7 @@ class DiagnosticsPage(HOTSPage):
                     errors += 1
                     self._emitter.row_ready.emit(T("diag_exist_err"), host, e["ip"], T("diag_exist_err_info"), "error")
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
         if run_id != self._run_id:
             return
@@ -487,7 +561,7 @@ class DiagnosticsPage(HOTSPage):
         for col, text in enumerate([col0, host, ip, info]):
             item = QTableWidgetItem(text)
             item.setForeground(fg)
-            item.setData(Qt.UserRole, host)
+            item.setData(Qt.UserRole, (host, ip))
             item.setToolTip(text)
             self.table.setItem(row, col, item)
 
@@ -496,19 +570,25 @@ class DiagnosticsPage(HOTSPage):
         self._prog_count.setText(f"{done} / {total}")
 
     def _scan_done(self, summary: str):
+        if is_shutting_down():
+            return
         self._prog_lbl.setText(T("diag_scan_done"))
         self._status.setText(summary)
         self._run_btn.set_accent(True)
         self._run_btn.setEnabled(True)
-        self._stop_btn.setEnabled(False)
+        if self._stop_btn is not None:
+            self._stop_btn.setEnabled(False)
 
-    def _selected_hostnames(self) -> set:
+    def _selected_entries(self) -> set:
         seen = set()
         for item in self.table.selectedItems():
-            h = item.data(Qt.UserRole)
-            if h:
-                seen.add(h)
+            data = item.data(Qt.UserRole)
+            if data:
+                seen.add(data)
         return seen
+
+    def _selected_hostnames(self) -> set:
+        return {host for host, _ip in self._selected_entries()}
 
     def _warn_hostnames(self) -> set:
         result = set()
@@ -541,18 +621,21 @@ class DiagnosticsPage(HOTSPage):
             self.table.removeRow(row)
 
     def _remove_selected(self):
-        hostnames = self._selected_hostnames()
-        if not hostnames:
+        entries_sel = self._selected_entries()
+        if not entries_sel:
             HOTSDialog.info(self, T("no_sel_title"), T("diag_no_sel_msg"))
             return
+        hostnames = {host for host, _ip in entries_sel}
         preview = "\n".join(list(hostnames)[:10])
         suffix  = T("diag_more", n=len(hostnames) - 10) if len(hostnames) > 10 else ""
         if not HOTSDialog.ask(self, T("diag_del_confirm_title"),
-                              T("diag_del_sel_msg", n=len(hostnames), preview=preview, suffix=suffix)):
+                              T("diag_del_sel_msg", n=len(entries_sel), preview=preview, suffix=suffix)):
             return
-        if self._on_remove:
+        if self._on_remove_exact:
+            self._on_remove_exact(entries_sel)
+        elif self._on_remove:
             self._on_remove(hostnames)
-        self._status.setText(T("diag_status_deleted_sel", n=len(hostnames)))
+        self._status.setText(T("diag_status_deleted_sel", n=len(entries_sel)))
         rows_to_del = sorted(
             {self.table.row(item) for item in self.table.selectedItems()},
             reverse=True

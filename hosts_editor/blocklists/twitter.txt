@@ -1,3 +1,13 @@
+0.0.0.0	ads-twitter.com
+0.0.0.0	ads.x.com
+0.0.0.0	api.x.com
+0.0.0.0	business.x.com
+0.0.0.0	developer.x.com
+0.0.0.0	help.x.com
+0.0.0.0	mobile.x.com
+0.0.0.0	twimg.com
+0.0.0.0	upload.x.com
+0.0.0.0	video.twimg.com
 0.0.0.0    0.twitter.com
 0.0.0.0    2010.twitter.com
 0.0.0.0    2011.twitter.com

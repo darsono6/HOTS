@@ -778,3 +778,11 @@
 0.0.0.0	zh-cn.facebook.com
 0.0.0.0	zh-hk.facebook.com
 0.0.0.0	zh-tw.facebook.com
+0.0.0.0	graph.facebook.com
+0.0.0.0	graph-video.facebook.com
+0.0.0.0	messenger.com
+0.0.0.0	m.me
+0.0.0.0	threads.net
+0.0.0.0	www.threads.net
+0.0.0.0	workplace.com
+0.0.0.0	www.workplace.com

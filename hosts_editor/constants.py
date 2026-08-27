@@ -7,6 +7,12 @@ HOSTS_PATH = r"C:\Windows\System32\drivers\etc\hosts"
 _cfg_dir = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts"
 SETTINGS_PATH = _cfg_dir / "settings.json"
 
+CUSTOM_DOMAINS_PATH = Path(HOSTS_PATH).parent / "custom_domains.txt"
+
+
+def custom_domains_path() -> str:
+    return str(CUSTOM_DOMAINS_PATH)
+
 
 def load_settings() -> dict:
     try:

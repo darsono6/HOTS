@@ -11,6 +11,8 @@ def _setup_error_log():
         log_dir = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "error.log"
+        if getattr(sys.stderr, "name", None) == str(log_path):
+            return
         sys.stderr = open(log_path, "w", encoding="utf-8", buffering=1)
         sys.stdout = sys.stderr
         faulthandler.enable(file=sys.stderr, all_threads=True)
@@ -46,8 +48,6 @@ def _set_app_user_model_id():
     except Exception:
         pass
 
-_set_app_user_model_id()
-
 
 REG_KEY = r"Software\HOTS Hosts"
 REG_VAL = "AppPasswordHash"
@@ -55,20 +55,39 @@ REG_VAL = "AppPasswordHash"
 def _reg_get_password() -> str:
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY) as k:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REG_KEY) as k:
             val, _ = winreg.QueryValueEx(k, REG_VAL)
-            return val or ""
+            if val:
+                return val
     except Exception:
-        return ""
+        pass
+
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY) as k:
+            old_val, _ = winreg.QueryValueEx(k, REG_VAL)
+        if old_val:
+            _reg_set_password(old_val)
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY,
+                                    0, winreg.KEY_SET_VALUE) as k:
+                    winreg.DeleteValue(k, REG_VAL)
+            except Exception:
+                pass
+            return old_val
+    except Exception:
+        pass
+
+    return ""
 
 def _reg_set_password(hash_value: str):
     try:
         import winreg
         if hash_value:
-            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_KEY) as k:
+            with winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, REG_KEY) as k:
                 winreg.SetValueEx(k, REG_VAL, 0, winreg.REG_SZ, hash_value)
         else:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY,
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REG_KEY,
                                 0, winreg.KEY_SET_VALUE) as k:
                 winreg.DeleteValue(k, REG_VAL)
     except Exception:
@@ -76,8 +95,8 @@ def _reg_set_password(hash_value: str):
 
 
 def _resource_path(name: str) -> str:
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, name)
+    from .resource_utils import resource_path
+    return resource_path(name)
 
 
 def _make_splash():
@@ -104,14 +123,18 @@ def _make_splash():
     return splash
 
 
-def _fade_splash(app, splash, start: float, end: float, duration_ms: int, steps: int = 20):
-    import time
-    step_delay = (duration_ms / 1000.0) / steps
-    for i in range(steps + 1):
-        t = i / steps
-        splash.setWindowOpacity(start + (end - start) * t)
-        app.processEvents()
-        time.sleep(step_delay)
+def _fade_splash(app, splash, start: float, end: float, duration_ms: int):
+    from PySide6.QtCore import QPropertyAnimation, QEventLoop
+
+    anim = QPropertyAnimation(splash, b"windowOpacity")
+    anim.setStartValue(start)
+    anim.setEndValue(end)
+    anim.setDuration(duration_ms)
+
+    loop = QEventLoop()
+    anim.finished.connect(loop.quit)
+    anim.start()
+    loop.exec()
 
 
 def main():
@@ -151,6 +174,9 @@ def _run():
     app.setApplicationName("HOTS Hosts")
     app.setQuitOnLastWindowClosed(False)
 
+    from . import bg_tasks
+    app.aboutToQuit.connect(bg_tasks.begin_shutdown_and_wait)
+
     app._no_sb_ctx_filter = NoScrollbarContextMenuFilter(app)
     app.installEventFilter(app._no_sb_ctx_filter)
 
@@ -174,22 +200,7 @@ def _run():
         if splash is not None:
             splash.close()
 
-    if password_hash:
-        from .dialogs import PasswordPromptDialog
-
-        def _launch():
-            _show_splash_fadein()
-
-            from .app import HostsEditor
-            win = HostsEditor(on_before_show=_before_show)
-            if not _icon.isNull():
-                win.setWindowIcon(_icon)
-            app.setQuitOnLastWindowClosed(True)
-
-        dlg = PasswordPromptDialog(None, password_hash,
-                                   on_success=_launch, on_cancel=app.quit)
-        dlg.show()
-    else:
+    def _launch():
         _show_splash_fadein()
 
         from .app import HostsEditor
@@ -198,7 +209,31 @@ def _run():
             win.setWindowIcon(_icon)
         app.setQuitOnLastWindowClosed(True)
 
-    sys.exit(app.exec())
+    if password_hash:
+        from .dialogs import PasswordPromptDialog
+        dlg = PasswordPromptDialog(None, password_hash,
+                                   on_success=_launch, on_cancel=app.quit)
+        dlg.show()
+    else:
+        _launch()
+
+    exit_code = app.exec()
+
+    try:
+        _app_instance = QApplication.instance()
+        if _app_instance is not None:
+            for _w in list(_app_instance.topLevelWidgets()):
+                try:
+                    _w.close()
+                    _w.deleteLater()
+                except Exception:
+                    pass
+            for _ in range(3):
+                _app_instance.processEvents()
+    except Exception:
+        pass
+
+    sys.exit(exit_code)
 
 
 def _show_crash(tb: str):

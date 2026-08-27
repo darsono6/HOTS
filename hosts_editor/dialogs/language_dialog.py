@@ -29,9 +29,9 @@ class LanguageDialog(HOTSDialog):
             rb = QRadioButton(f"{flags.get(code, '')}  {name}")
             rb.setStyleSheet(
                 f"QRadioButton {{ color: {DARK['fg']}; background: transparent; spacing: 12px; font-size: 10pt; padding: 4px 0px; }}\n"
-                f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 7px; background: {DARK['indicator_bg']}; }}\n"
+                f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
                 f"QRadioButton::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-                f"QRadioButton::indicator:checked {{ background: transparent; border: 4px solid {DARK['accent']}; }}"
+                f"QRadioButton::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
             )
             if code == current_lang():
                 rb.setChecked(True)

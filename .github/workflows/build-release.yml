@@ -1,0 +1,65 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # runs on tags like v2.1.0
+  workflow_dispatch:    # also allows manual run from the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'   # match the version you use locally
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka
+          pip install -r requirements.txt
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka --standalone --msvc=latest --windows-console-mode=disable `
+            --windows-icon-from-ico="icon.ico" `
+            --output-filename="HOTS Hosts.exe" `
+            --output-dir=dist `
+            --include-data-files="hosts_editor/logo.png=logo.png" `
+            --include-data-files="hosts_editor/logo1.png=logo1.png" `
+            --include-data-files="hosts_editor/logo.ico=logo.ico" `
+            --include-data-files="hosts_editor/logoS.png=logoS.png" `
+            --include-data-dir="hosts_editor/blocklists=blocklists" `
+            --include-package-data=certifi `
+            --enable-plugin=pyside6 `
+            --nofollow-import-to=PIL `
+            --nofollow-import-to=scipy `
+            --nofollow-import-to=colorthief `
+            hosts_editor_launcher.pyw
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer with Inno Setup
+        run: iscc setup.iss
+
+      # The SignPath signing step will go here in the future, between the
+      # build and the upload/release - we'll add it once you're approved.
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: Output/*.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: Output/*.exe

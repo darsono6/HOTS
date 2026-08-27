@@ -1,7 +1,7 @@
 import hashlib
 
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QWidget
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from qfluentwidgets import FluentIcon as FIF
 
@@ -72,18 +72,18 @@ class SetPasswordDialog(HOTSDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         save_btn = HOTSButton(FIF.SAVE, "#ffffff", T("pwd_btn_set"), accent=True)
-        save_btn.fit_to_content()
+        save_btn.fit_to_content(min_width=100)
         save_btn.clicked.connect(self._confirm)
         btn_row.addWidget(save_btn)
 
         if self._has_pass:
             del_btn = HOTSButton(FIF.DELETE, DARK["red"], T("pwd_btn_remove"))
-            del_btn.fit_to_content()
+            del_btn.fit_to_content(min_width=100)
             del_btn.clicked.connect(self._remove_password)
             btn_row.addWidget(del_btn)
 
         cancel_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("pwd_btn_cancel"))
-        cancel_btn.fit_to_content()
+        cancel_btn.fit_to_content(min_width=100)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
         btn_row.addStretch()
@@ -184,12 +184,12 @@ class PasswordPromptDialog(HOTSDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         ok_btn = HOTSButton(FIF.ACCEPT, "#ffffff", T("pwd_btn_confirm"), accent=True)
-        ok_btn.fit_to_content()
+        ok_btn.fit_to_content(min_width=100)
         ok_btn.clicked.connect(self._confirm)
         btn_row.addWidget(ok_btn)
 
         cancel_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("pwd_btn_cancel"))
-        cancel_btn.fit_to_content()
+        cancel_btn.fit_to_content(min_width=100)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
         btn_row.addStretch()
@@ -209,4 +209,10 @@ class PasswordPromptDialog(HOTSDialog):
             return
         
         super().accept()
-        self._on_success()
+        # Budowa glownego okna (HostsEditor) jest ciezka (nawigacja, wszystkie
+        # strony, wczytanie hosts) i jest wywolywana z tego samego slotu, co
+        # zamkniecie tego dialogu. Bez odlozenia o jeden obieg petli zdarzen,
+        # ta ciezka konstrukcja startuje zanim Qt zdazy w pelni domalowac
+        # zamkniecie dialogu, co widac jako inne (gorsze) rysowanie okna
+        # glownego przy starcie z hastem niz bez hasla.
+        QTimer.singleShot(0, self._on_success)

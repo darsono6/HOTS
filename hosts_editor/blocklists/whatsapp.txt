@@ -2,10 +2,12 @@
 0.0.0.0	api.whatsapp.com
 0.0.0.0	autodiscover.whatsapp.com
 0.0.0.0	blog.whatsapp.com
+0.0.0.0	business.whatsapp.com
 0.0.0.0	chat.cdn.whatsapp.net
 0.0.0.0	chat.whatsapp.com
 0.0.0.0	crashlogs.whatsapp.net
 0.0.0.0	dev-web.whatsapp.com
+0.0.0.0	developers.whatsapp.com
 0.0.0.0	dit.whatsapp.net
 0.0.0.0	e1.whatsapp.net
 0.0.0.0	e10.whatsapp.net
@@ -93,6 +95,7 @@
 0.0.0.0	static.whatsapp.net
 0.0.0.0	v.whatsapp.com
 0.0.0.0	v.whatsapp.net
+0.0.0.0	wa.me
 0.0.0.0	web.whatsapp.com
 0.0.0.0	whatsapp-cdn-shv-01-arn2.fbcdn.net
 0.0.0.0	whatsapp-cdn-shv-01-dfw5.fbcdn.net

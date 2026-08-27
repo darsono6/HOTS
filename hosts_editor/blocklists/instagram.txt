@@ -232,3 +232,11 @@
 0.0.0.0	z-p42-scontent-yyz1-1.cdninstagram.com
 0.0.0.0	z-p42-scontent.cdninstagram.com
 0.0.0.0	z-p42-static.cdninstagram.com
+0.0.0.0	graph.instagram.com
+0.0.0.0	m.instagram.com
+0.0.0.0	edge-chat.instagram.com
+0.0.0.0	edge-mqtt.instagram.com
+0.0.0.0	ig.me
+0.0.0.0	about.instagram.com
+0.0.0.0	blog.instagram.com
+0.0.0.0	developers.instagram.com

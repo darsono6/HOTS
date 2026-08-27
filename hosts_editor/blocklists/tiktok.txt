@@ -4,6 +4,8 @@
 0.0.0.0	analytics.tiktok.com
 0.0.0.0	api.tiktokv.com
 0.0.0.0	api16.tiktokv.com
+0.0.0.0	bytedance.com
+0.0.0.0	byteoversea.com
 0.0.0.0	dm-maliva16.byteoversea.com
 0.0.0.0	dm.bytedance.com
 0.0.0.0	dm16-alisg.tiktokv.com
@@ -18,6 +20,7 @@
 0.0.0.0	gecko-va.tiktokv.com.edgesuite.net
 0.0.0.0	gecko16-normal-c-useast1a.tiktokv.com
 0.0.0.0	gecko16-normal-c-useast2a.tiktokv.com
+0.0.0.0	ibytedtos.com
 0.0.0.0	jsb-va.tiktokv.com
 0.0.0.0	likee.video
 0.0.0.0	log-va.tiktokv.com
@@ -58,6 +61,7 @@
 0.0.0.0	p77-va.tiktokcdn.com
 0.0.0.0	p77-webcast.tiktokcdn.com
 0.0.0.0	p9-tt.byteimg.com
+0.0.0.0	pstatp.com
 0.0.0.0	pull-f3-hs.pstatp.com
 0.0.0.0	pull-f5-hs.flive.pstatp.com
 0.0.0.0	pull-f5-hs.pstatp.com
@@ -86,15 +90,18 @@
 0.0.0.0	sf77-va.tiktokcdn.com
 0.0.0.0	sf77-webcast.tiktokcdn.com
 0.0.0.0	sgali3.l.byteoversea.net
+0.0.0.0	snssdk.com
 0.0.0.0	tiktok-lb-alisg.byteoversea.net
 0.0.0.0	tiktok-lb-maliva.byteoversea.net
 0.0.0.0	tiktok-platform-lb-alisg.byteoversea.net
 0.0.0.0	tiktok-platform-lb-maliva.byteoversea.net
 0.0.0.0	tiktok.com
 0.0.0.0	tiktok.org
+0.0.0.0	tiktokcdn.com
 0.0.0.0	tiktokcdn.com.tlivepush.com
 0.0.0.0	tiktokglobalshop.com
 0.0.0.0	tiktokglobalshopv.com
+0.0.0.0	tiktokrow-icon.com
 0.0.0.0	tiktokshop.com
 0.0.0.0	tiktokv.com
 0.0.0.0	tlivecdn.com

@@ -32,9 +32,9 @@ class ExportOptionsDialog(HOTSDialog):
 
         _rb_style = (
             f"QRadioButton {{ color: {DARK['fg']}; background: transparent; spacing: 12px; font-size: 10pt; padding: 2px 0px; }}\n"
-            f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 7px; background: {DARK['indicator_bg']}; }}\n"
+            f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
             f"QRadioButton::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-            f"QRadioButton::indicator:checked {{ background: transparent; border: 4px solid {DARK['accent']}; }}"
+            f"QRadioButton::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
         )
 
         self._rb_group = QButtonGroup(self)
@@ -77,15 +77,16 @@ class ExportOptionsDialog(HOTSDialog):
         btn_row.addStretch()
         
         exp_btn = HOTSButton(FIF.SHARE, "#ffffff", T("btn_export"), accent=True)
-        exp_btn.fit_to_content()
+        exp_btn.fit_to_content(min_width=100)
         exp_btn.clicked.connect(self._do_export)
         btn_row.addWidget(exp_btn)
 
         cancel_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("btn_cancel"))
-        cancel_btn.fit_to_content()
+        cancel_btn.fit_to_content(min_width=100)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
-        
+
+        btn_row.addStretch()
         cl.addLayout(btn_row)
 
     def _do_export(self):

@@ -70,7 +70,7 @@ class EntryDialog(HOTSDialog):
 
         self.result      = None
         self.result_list = None
-        self._existing   = {h.lower() for h in (existing_hostnames or set())}
+        self._existing   = dict(existing_hostnames or {})
         self._is_edit    = entry is not None
         self._ip_valid   = True
 
@@ -106,9 +106,10 @@ class EntryDialog(HOTSDialog):
         self._enabled_cb = QCheckBox(T("entry_lbl_active"))
         self._enabled_cb.setChecked(entry["enabled"] if entry else True)
         self._enabled_cb.setStyleSheet(
-            f"QCheckBox {{ color: {DARK['fg']}; background: transparent; spacing: 8px; }}"
-            f"QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {DARK['border']}; "
-            f"border-radius: 3px; background: {DARK['bg3']}; }}"
+            f"QCheckBox {{ color: {DARK['fg']}; background: transparent; spacing: 10px; }}"
+            f"QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; "
+            f"border-radius: 4px; background: {DARK['indicator_bg']}; }}"
+            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}"
             f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
         )
         form.addRow("", self._enabled_cb)
@@ -119,12 +120,12 @@ class EntryDialog(HOTSDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         save_btn = HOTSButton(FIF.SAVE, "#ffffff", T("entry_btn_save"), accent=True)
-        save_btn.fit_to_content()
+        save_btn.fit_to_content(min_width=100)
         save_btn.clicked.connect(self._save)
         btn_row.addWidget(save_btn)
 
         cancel_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("entry_btn_cancel"))
-        cancel_btn.fit_to_content()
+        cancel_btn.fit_to_content(min_width=100)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
         btn_row.addStretch()
@@ -175,7 +176,7 @@ class EntryDialog(HOTSDialog):
             h = self._sanitize_hostname(raw)
             if h and h.lower() in self._existing:
                 self._host_hint.setStyleSheet(f"color: {DARK['red']}; font-size: 8pt; background: transparent;")
-                self._host_hint.setText(T("entry_hint_dup"))
+                self._host_hint.setText(T("entry_hint_dup", existing_ip=self._existing[h.lower()]))
                 return
         self._host_hint.setText("")
 
@@ -205,7 +206,7 @@ class EntryDialog(HOTSDialog):
                     skipped.append(e["hostname"])
                 else:
                     new_entries.append(e)
-                    self._existing.add(e["hostname"].lower())
+                    self._existing[e["hostname"].lower()] = e["ip"]
             if skipped and not new_entries:
                 HOTSDialog.info(self, T("entry_skip_title"),
                                 T("entry_skip_msg", n=len(skipped), list="\n".join(skipped[:10])))
@@ -222,7 +223,9 @@ class EntryDialog(HOTSDialog):
             if not HOTSDialog.ask(self, T("entry_bad_ip_title"), T("entry_bad_ip_ask", ip=ip)):
                 return
         if not self._is_edit and host.lower() in self._existing:
-            if not HOTSDialog.ask(self, T("entry_dup_title"), T("entry_dup_ask", host=host)):
+            if not HOTSDialog.ask(self, T("entry_dup_title"),
+                                  T("entry_dup_ask", host=host, ip=ip,
+                                    existing_ip=self._existing[host.lower()])):
                 return
 
         self.result = {
