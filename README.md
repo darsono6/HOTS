@@ -29,9 +29,30 @@ Three things, in plain terms:
 You don't need to understand *how* any of this works to use it — the app walks you through it.
 
 <div align="center">
+
 <img src="hosts_editor/assets/screenshot_main.png" alt="Main Window" width="650"/>
+<br/><sub>Main window — table view with live search and entry management</sub>
+
+<br/><br/>
 
 <img src="hosts_editor/assets/screenshot_parental.png" alt="Parental Control Panel" width="650"/>
+<br/><sub>Parental Control — category blocklists with Cloudflare Family DNS toggle</sub>
+
+<br/><br/>
+
+<img src="hosts_editor/assets/screenshot_privacy.png" alt="Privacy Panel" width="650"/>
+<br/><sub>Privacy — tiered telemetry controls with drift detection</sub>
+
+<br/><br/>
+
+<img src="hosts_editor/assets/screenshot_diagnostics_domains.png" alt="Domain Existence Check" width="650"/>
+<br/><sub>Diagnostics — "Check domains" scanning entries against public DNS</sub>
+
+<br/><br/>
+
+<img src="hosts_editor/assets/screenshot_diagnostics_malware.png" alt="Malware Scanner" width="650"/>
+<br/><sub>Diagnostics — "Scan malware" heuristic engine flagging suspicious entries</sub>
+
 </div>
 
 ---
