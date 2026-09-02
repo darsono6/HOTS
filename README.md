@@ -2,215 +2,127 @@
 
 <img src="hosts_editor/assets/banner.png" alt="HOTS Hosts Banner" width="720"/>
 
-# HOTS Hosts v2.1
+# HOTS Hosts
 
-**A Fluent-Design desktop application for managing the Windows hosts file — part of the HOTS Tools family.**
+**Block distracting apps, protect your kids online, and stop Windows from spying on you — all from one simple app.**
 
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%2864--bit%29-0078D4?logo=windows)](https://github.com/)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Qt](https://img.shields.io/badge/UI-PySide6%20%2F%20Fluent%20Design-41CD52?logo=qt)](https://pypi.org/project/PySide6/)
-[![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES-brightgreen)](#-multilingual-support)
+[![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES-brightgreen)](#-language-support)
 
-### 📥 [⬇️ Download HOTS_Hosts_setup.exe](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
+### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
+
+*No account, no subscription, no ads. Just download and run.*
 
 </div>
 
 ---
 
-## 📋 Overview
+## What does it actually do?
 
-**HOTS Hosts** is a lightweight, feature-rich Windows application that lets you view, edit, and manage the system `hosts` file through a clean, modern GUI — no more manually navigating to `C:\Windows\System32\drivers\etc\` and fighting with Notepad permissions.
+Three things, in plain terms:
 
-Version 2.0 was a ground-up rebuild: the interface moved from Tkinter to **PySide6 with Fluent Design (QFluentWidgets)**, bringing a proper light/dark theme, custom accent colors, and a persistent side-navigation layout instead of pop-up dialogs.
+- 🛡️ **Parental controls** — block TikTok, Instagram, YouTube, adult sites, and more with one click. No router settings, no complicated setup.
+- 🔒 **Windows privacy** — turn off the telemetry and tracking Windows collects by default, with one click per setting.
+- ✏️ **Hosts file editor** — if you already know what the Windows hosts file is, this gives you a proper table editor for it instead of fighting Notepad and admin permissions.
 
-Version 2.1 builds on that foundation with a **hosts file lock**, **application blocking**, **DNS-over-HTTPS blocking in browsers**, **popular VPN client blocking**, a **password-protected uninstaller**, and a significantly expanded Privacy module.
-
-HOTS Hosts is the first release under **[HOTS Tools](https://hotstools.com)** — a small line of no-nonsense Windows utilities.
-
-Built as a personal hobby project, released free under **GPLv3**.
-
----
-
-## 📸 Screenshots
+You don't need to understand *how* any of this works to use it — the app walks you through it.
 
 <div align="center">
+<img src="hosts_editor/assets/screenshot_main.png" alt="Main Window" width="650"/>
 
-<img src="hosts_editor/assets/screenshot_main.png" alt="Main Window" width="700"/>
-
-*Main window — table view with live search and entry management*
-
-<br/>
-
-<img src="hosts_editor/assets/screenshot_parental.png" alt="Parental Control Panel" width="700"/>
-
-*Parental Control — category blocklists with Cloudflare Family DNS toggle*
-
-<br/>
-
-<img src="hosts_editor/assets/screenshot_privacy.png" alt="Privacy Panel" width="700"/>
-
-*Privacy — tiered telemetry controls with drift detection*
-
-<br/>
-
-<img src="hosts_editor/assets/screenshot_diagnostics_domains.png" alt="Domain Existence Check" width="700"/>
-
-*Diagnostics — "Check domains" scanning entries against public DNS*
-
-<br/>
-
-<img src="hosts_editor/assets/screenshot_diagnostics_malware.png" alt="Malware Scanner" width="700"/>
-
-*Diagnostics — "Scan malware" heuristic engine flagging suspicious entries*
-
+<img src="hosts_editor/assets/screenshot_parental.png" alt="Parental Control Panel" width="650"/>
 </div>
 
 ---
 
-## ✨ Features
+## Getting started
 
-### Core editing
-- 📄 **Real-time table view** of all hosts entries — active, disabled, and comments
-- ➕ **Add / Edit / Delete** entries with a polished dialog
-- ⏻ **Enable / Disable** entries without deleting them (toggles the `#` prefix)
-- 🔍 **Live search & filter** across IP, hostname, and comment columns
-- 📋 **Bulk paste** — paste multiple `IP hostname` lines at once
-- 🔃 **Column sorting** by any field
+1. **[Download the installer](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)**
+2. Double-click it — Windows will ask for Administrator permission (that's normal, the app needs it to edit system files)
+3. Follow the setup wizard — done
 
-### Safety & backups
-- 💾 **Auto-backup before every save** — rotating archive of the last 15 backups
-- 🗂 **Backup Manager** — browse, restore, or delete any backup
-- 👁 **Diff preview** — see exact line-by-line changes before writing to disk
-- ✅ **Post-save verification** — confirms the file was written correctly
-- 🔒 **20 000 entry limit** — blocks saves that would freeze Windows DNS Client
+**Requires:** Windows 10 or 11, 64-bit.
 
-### Import / Export
-- 📥 **Import** any hosts-format `.txt` file
-- 📤 **Export** to `.txt` (hosts format) or `.csv` (with Status, IP, Hostname, Comment columns)
+### About the Windows warning you might see
 
-### Diagnostics
-- 🔍 **Domain existence check** — queries Google/Cloudflare public DNS directly (in parallel, multi-threaded), bypassing the local hosts file; flags domains that no longer exist in DNS
-- 🛡 **Malware scanner** — a heuristic engine covering well over a dozen risk signals, including:
-  - Known system/payment domains redirected to a non-loopback IP
-  - Windows Update / antivirus update domains being blocked
-  - Entries redirecting to a public (non-private, non-loopback) IP
-  - Mass-redirect patterns (many domains pointing at the same IP)
-  - Hostnames that are raw IP addresses
-  - Cyrillic/Unicode homoglyph characters and zero-width characters hidden in a hostname
-  - Punycode (`xn--`) hostnames
-  - High-entropy, DGA-style hostnames (randomly-generated-looking labels)
-  - Typosquatting of well-known domains (fuzzy-matched against a known-safe list)
-  - Suspicious TLDs, unusually deep subdomains, and brand-impersonation / long-digit / long-label naming patterns
-  - Known-safe subdomains and CDNs are automatically whitelisted to cut down on false positives
-  - A per-entry **ignore list** so confirmed-safe results don't keep re-appearing in future scans
+Since this is a small independent project without a paid certificate, Windows may show a **"Windows protected your PC"** warning the first time you run it. This is normal for any new app that hasn't built up a download history yet — it does **not** mean anything is wrong with the file.
 
-### Parental Control
-- 🛡 Built-in blocklist manager for 15 categories:
-  - 🐦 Twitter/X · 📸 Instagram · ▶ YouTube · 👤 Facebook · 💬 WhatsApp
-  - 🎵 TikTok · 🎮 Twitch · 👻 Snapchat · 📌 Pinterest · 🤖 Reddit
-  - 🔞 Adult content · 🕹️ Games · ⛔ Torrent · 💘 Dating sites · 🎥 Random video chat
-- Each category uses unique section tags — categories never overwrite each other
-- Toggle any category on/off with one click; DNS cache flushed automatically
-- 🌐 **Cloudflare Family DNS** — one-click enforcement of DNS-level adult content blocking (1.1.1.3 / 1.0.0.3):
-  - Detects all active (operationally up) network interfaces natively via the Windows `iphlpapi` API (`GetAdaptersAddresses`) — no `netsh`/PowerShell subprocess is spawned for detection, so it's instant and works identically regardless of Windows display language
-  - Backs up original DNS settings per interface to `%APPDATA%\HOTS Hosts\dns_backup.json` before switching
-  - Restores previous DNS (or falls back to DHCP) when Parental Control is disabled
-  - State persists across HOTS sessions — DNS remains protected even after the app is closed
-- 🔒 **Hosts file lock** *(new in 2.1)* — one click denies standard processes Write/Delete access to the hosts file (Windows ACL), so blocklists can't be edited or deleted from outside HOTS by a curious kid or by malware. Unlock any time a trusted program needs write access.
-- 🚫 **Application blocking** *(new in 2.1)* — block specific programs (games, VPN clients, etc.) from launching at all:
-  - **Image File Execution Options (IFEO)** redirects the executable name to a non-existent path, so Windows refuses to start it — silently, no error dialog
-  - Optional **ACL deny** on the exact `.exe` file (Write + Delete + ExecuteFile) closes the simplest bypass (renaming the file), since NTFS permissions belong to the file object itself, not its current name
-  - A built-in watchdog detects if a block was removed outside the app and warns you
-  - Scoped as a deterrent against casual/inexperienced bypass attempts (e.g. a teenager), not as protection against a technically sophisticated attacker copying the program elsewhere
-- 🥷 **Popular VPN client blocking** *(new in 2.1)* — one click blocks a curated list of 10 well-known VPN clients (NordVPN, ExpressVPN, ProtonVPN, and others), using the same IFEO + ACL mechanism as general Application blocking
-- 🔐 **DNS-over-HTTPS blocking in browsers** *(new in 2.1)* — closes the DoH bypass (see "Known Limitations" below) at the source instead of relying on the user to disable it manually in each browser:
-  - Sets the same managed-browser Group Policy that organizations use via Group Policy — Chrome, Edge and Brave get `DnsOverHttpsMode=off`, Firefox gets its `DNSOverHTTPS` policy disabled and locked
-  - Written directly to `HKEY_LOCAL_MACHINE`, so it can't be turned back on from inside the browser's own settings
-  - A drift watchdog checks on launch whether a previously-enabled block was manually reversed (e.g. after a browser update) and lets you re-apply it with one click
-  - Per-browser toggle only shown for browsers actually installed on the machine
+To continue: click **More info** → **Run anyway**.
 
-> ℹ️ The telemetry/tracking-domain blocklist (previously listed as a 14th Parental Control category) now lives under **Privacy**, alongside the other telemetry tweaks — see below.
+If you'd rather double-check the app yourself first, the full source code is right here in this repository — see [Running from source](#running-from-source) below.
 
-### 🕵️ Privacy (formerly "Windows AntiSpy")
-Completely rebuilt from a single on/off switch into a tiered, granular control center covering **37 individual system tweaks**, organized into four levels:
-
-- **Basic** (13 tweaks) — `AllowTelemetry` policy, `DiagTrack` and `dmwappushservice` services, Windows experimentation/telemetry, advertising ID, Bing/search-box suggestions, tailored experiences, Consumer Features, Delivery Optimization P2P sharing, Windows Recall, feedback notifications, CEIP
-- **Medium** (12 tweaks) — firewall rules blocking `CompatTelRunner.exe`, `devicecensus.exe`, `WerFault.exe`, plus disabling 9 scheduled tasks (`Compatibility Appraiser`, `ProgramDataUpdater`, `Consolidator`, `UsbCeip`, `QueueReporting`, `KernelCeipTask`, `Microsoft-Windows-DiskDiagnosticDataCollector`, `Siuf\DmClient`, `Siuf\DmClientOnScenarioDownload`)
-- **Advanced** (5 tweaks) — `WerSvc` / `PcaSvc` services, Activity Feed / Timeline, cross-device activity publishing and upload
-- **Privacy+** (7 tweaks) — `lfsvc` geolocation service, `DisableLocation` policy, implicit text/handwriting-input collection, personalization policy, cross-device clipboard, Find My Device
-
-Each level shows **"{active} of {total} active"**, and every individual tweak can be expanded, reviewed, and toggled on its own.
-
-- 📡 **Known telemetry domains** — a 5th, separate hosts-file blocklist toggle (the domain list formerly surfaced under Parental Control) sits beneath the four tweak levels
-- 🩹 **Drift detection** — if Windows resets a protected setting (e.g. after a major update), HOTS flags it with a warning and lets you re-apply it with one click
-- 🛟 **System Restore integration** — create a Windows System Restore point with one click before applying changes, plus a one-click option to remove Windows' restore-point creation frequency limit if it's blocking you
-- 🚫 **Block System Restore tool** *(new)* — prevents the Windows System Restore wizard (`rstrui.exe`) from starting at all, closing a way to bypass parental controls (without this block, anyone with access to the PC could open System Restore and revert the whole system to before the blocks were set up). Restore points are still created automatically in the background, and you can still make one yourself from the button above even while this is active
-- 📝 **Block your own domains** *(new)* — a free-text blocklist for anything not covered by the built-in categories: type in any domain (e.g. `example.com`) and it's blocked at the hosts-file level, same as the Parental Control categories. The list is stored safely and survives a hosts file restore or uninstall
-- Saves the exact pre-change state before touching anything, so every level can be **fully reverted**
-- Requires Administrator rights (UAC prompt on launch covers this)
-- Intentionally scoped to the highest-impact, most reliable tweaks — not a comprehensive privacy suite
-
-### 🎨 Appearance
-- 🌗 **Light and Dark themes** — switch anytime in Options
-- 🎨 **4 accent colors** — Gold, Red, Green, Blue
-- 🧭 **Fluent Design navigation** — persistent side panel instead of pop-up dialogs
-
-### 🔄 Updates
-- 🔔 **Built-in update checker** — checks GitHub Releases and notifies you when a newer version of HOTS Hosts is available, with a direct link to download it
-
-### UI & UX
-- 🌐 **5 languages** — English (default), Polish, Français, Deutsch, Español — switch in Options, saved across sessions
-- 🔑 **Password protection** — optional SHA-256 hashed password, stored machine-wide in `HKEY_LOCAL_MACHINE` (so it applies no matter which Windows account is used), required both to open the app and to uninstall it (the installer prompts for it before removing anything)
-- 📝 **Raw text view** — edit the hosts file directly like Notepad, with syntax highlighting
-- 🗃 **Geometry persistence** — remembers window size and position
-- 🔧 **File repair** — auto-fixes wildcard entries, removes duplicates and malformed lines
-- 🧹 **Restore default** — replaces current hosts with Microsoft's clean default (backup created first)
-- 🚀 **Auto-elevation** — requests UAC Administrator rights on launch
-- 🔂 **Single-instance guard** — launching HOTS Hosts while it's already running switches focus to the existing window instead of opening a duplicate
+See **[CODE_SIGNING.md](CODE_SIGNING.md)** for full details on why the release isn't signed yet and how release builds are produced.
 
 ---
 
-## 🛡️ Parental Control – Known Limitations
+## Everything it can do
 
-The Parental Control module blocks domains at the system level using the Windows `hosts` file, combined with Cloudflare Family DNS (1.1.1.3 / 1.0.0.3). This approach is effective but has inherent limitations you should be aware of:
+<details>
+<summary><strong>🛡️ Parental Control</strong> — click to expand</summary>
 
-### 🌐 The "Moving Target" Problem (TikTok, YouTube, Facebook…)
-Large platforms use hundreds of dynamically changing subdomains and CDN endpoints. A blocklist can never be 100% complete at any given moment.
-- **Built-in lists are updated with each HOTS release** to keep up with infrastructure changes.
-- **You can add missing domains yourself** — either directly from the main table, or with the dedicated **Block your own domains** list under Privacy (see above), which survives a hosts file restore or uninstall.
+- One-click blocklists for 15 categories: Twitter/X, Instagram, YouTube, Facebook, WhatsApp, TikTok, Twitch, Snapchat, Pinterest, Reddit, adult content, games, torrents, dating sites, random video chat
+- **Cloudflare Family DNS** — one click adds DNS-level filtering on top of the blocklists
+- **Hosts file lock** — stops the blocklists from being edited or removed by a curious kid (or malware) outside the app
+- **Application blocking** — stop specific programs (games, VPN apps) from launching at all
+- **VPN client blocking** — blocks 10 popular VPN apps that could otherwise be used to bypass the filters
+- **DNS-over-HTTPS blocking** — closes a common loophole where browsers quietly bypass the hosts file for DNS lookups
+- **Block System Restore** — stops someone from using System Restore to undo all the blocks
 
-### ⚠️ Browsers Can Bypass Hosts via DNS-over-HTTPS
-Modern browsers (Chrome, Firefox, Edge, Brave) include a feature called **Secure DNS / DNS-over-HTTPS (DoH)**. When enabled, the browser sends DNS queries directly to an external encrypted server, **completely bypassing the system hosts file**.
+</details>
 
-As of 2.1, HOTS Hosts closes this gap natively — see **DNS-over-HTTPS blocking in browsers** under Parental Control above. It blocks DoH at the system policy level (the same mechanism organizations use via Group Policy), so there's no need to dig through each browser's settings manually, and it can't be silently turned back on from inside the browser.
+<details>
+<summary><strong>🕵️ Windows Privacy</strong> — click to expand</summary>
 
-### 📱 Mobile Devices & VPN-Tunneled Traffic Are Not Covered
-The hosts file only affects the Windows PC it runs on. Phones, tablets, and traffic tunneled through a VPN service (i.e. once a device is actively connected to *some* VPN, wherever it is) will not be subject to these rules. This is separate from **VPN client blocking** (see Parental Control above), which stops specific VPN *applications* from launching on this PC in the first place — it doesn't affect devices that aren't running HOTS.
+37 individual telemetry and tracking settings, grouped into four levels (Basic → Privacy+) so you can go as light or as aggressive as you want. Covers Windows telemetry services, advertising ID, activity history, location tracking, Recall, and more. Every setting can be reviewed and toggled individually, and reverted at any time.
+
+Includes a drift detector that warns you if Windows quietly re-enables something after an update, and one-click System Restore point creation before you make changes.
+
+</details>
+
+<details>
+<summary><strong>✏️ Hosts File Editor</strong> — click to expand</summary>
+
+- Table view of all entries, live search, bulk paste, sorting
+- Add / edit / delete / enable-disable entries without touching Notepad
+- Auto-backup before every save (last 15 kept), with a diff preview before writing
+- Import/export `.txt` or `.csv`
+- Domain checker — flags entries pointing at domains that no longer exist
+- Malware scanner — heuristics for hijacked/suspicious entries (homoglyphs, DGA-style domains, typosquatting, and more)
+- Raw text view for anyone who wants to edit the file directly
+
+</details>
+
+<details>
+<summary><strong>🎨 Other features</strong> — click to expand</summary>
+
+- Light and dark themes, 4 accent colors
+- 5 languages: English, Polski, Français, Deutsch, Español
+- Optional password protection (required to open the app or uninstall it)
+- Built-in update checker
+- Auto-elevation, single-instance guard, window geometry memory
+
+</details>
 
 ---
 
-## ⬇️ Installation
+## Good to know before you rely on this
 
-### Option A — Run the installer (recommended)
+<details>
+<summary><strong>Limitations of hosts-file / DNS-based blocking</strong> — click to expand</summary>
 
-1. Download `HOTS_Hosts_setup.exe` from the [**Releases**](../../releases) page
-2. Double-click — UAC will prompt for Administrator rights
-3. Follow the setup wizard. Done. No further setup required.
+- Big platforms (TikTok, YouTube, Facebook) use huge numbers of changing CDN domains — no blocklist is ever 100% complete at every moment. Lists are updated with each release, and you can add your own domains any time.
+- Modern browsers can bypass the hosts file entirely via DNS-over-HTTPS — HOTS Hosts closes this at the system policy level as of v2.1, so you don't need to dig through each browser's settings.
+- This only affects the Windows PC it's installed on — phones, tablets, and traffic tunneled through a VPN service aren't covered by hosts-file rules (separate from VPN *client* blocking, which stops specific VPN apps from launching on this PC).
 
-> **System requirements:** Windows 10 or Windows 11, 64-bit. Windows 7/8/8.1 and 32-bit systems are not supported.
+</details>
 
-#### ⚠️ "Windows protected your PC" / SmartScreen warning
+---
 
-Since HOTS Hosts is a small independent project without a paid code-signing certificate, Windows SmartScreen may show a warning like *"this app isn't commonly downloaded"* the first few times it's downloaded. This is expected and does **not** mean the file is unsafe — it simply means Microsoft hasn't yet built up a download reputation for it (this happens to every new, unsigned `.exe`, regardless of safety).
+## Running from source
 
-To proceed:
-1. If you see a screen titled **"Windows protected your PC"**, click **More info**, then click **Run anyway**
-2. If you see the Edge/browser download warning shown above, click the **"…"** (more actions) menu next to the downloaded file → **Keep** → **Show more** → **Keep anyway**
-
-If you'd rather verify the file yourself first, you can always build it from source instead — see Option B below — or inspect the full source code in this repository.
-
-### Option B — Run from source
+<details>
+<summary>For developers — click to expand</summary>
 
 **Requirements:** Python 3.10+, `PySide6`, `PySide6-Fluent-Widgets`
 
@@ -224,11 +136,9 @@ cd HOTS
 pythonw -m hosts_editor
 ```
 
-> ⚠️ Must be run as **Administrator** — the hosts file is write-protected by Windows.
+> Must be run as **Administrator** — the hosts file is write-protected by Windows.
 
----
-
-## 🗂 Project Structure
+### Project structure
 
 ```
 icon.ico                    # Windows Explorer/shortcut icon
@@ -270,12 +180,13 @@ hosts_editor/
     └── _*.py                  # Shared/internal helpers for the pages above
 ```
 
+</details>
+
 ---
 
-## 🌐 Multilingual Support
+## Language support
 
-The interface language can be changed in the **Options → Language** panel.
-The selected language is saved to `%APPDATA%\HOTS Hosts\settings.json` and applied on the next launch — including the startup password prompt.
+The interface language can be changed in **Options → Language**. All UI strings, dialogs, and system comments are fully translated.
 
 | Code | Language |
 |------|----------|
@@ -285,34 +196,33 @@ The selected language is saved to `%APPDATA%\HOTS Hosts\settings.json` and appli
 | `de` | Deutsch |
 | `es` | Español |
 
-All UI strings, dialogs, error messages, column headers, and system comments (e.g. Parental Control entries in the hosts file) are fully translated.
+---
+
+## Disclaimer
+
+HOTS Hosts is provided in good faith but **without any warranty**. The author is **not responsible** for any damage, data loss, system issues, or other consequences resulting from the use of this application. Modifying the hosts file affects system-level network resolution — use with care. You use this software **at your own risk**.
 
 ---
 
-## ⚠️ Disclaimer
+## Security
 
-HOTS Hosts is provided in good faith but **without any warranty**.
-The author is **not responsible** for any damage, data loss, system issues, or other consequences resulting from the use of this application.
-Modifying the hosts file affects system-level network resolution — use with care.
-You use this software **at your own risk**.
+Found a security issue? Please report it privately rather than opening a public issue — see **[SECURITY.md](SECURITY.md)** for how to report and what's in scope.
 
 ---
 
-## ❤️ Support
+## Support
 
 If HOTS Hosts saves you time or you simply want to say thanks:
 
 **Website:** [hotstools.com](https://hotstools.com)
-
 **PayPal:** [paypal.me/darsonodark](https://paypal.me/darsonodark)
-
 **Support:** hots.support@gmail.com
 
 No registration required. Any amount is appreciated.
 
 ---
 
-## 📄 License
+## License
 
 [GNU General Public License v3.0](LICENSE.txt)
 © 2026 Darsono

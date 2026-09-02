@@ -1,40 +1,69 @@
 # Code Signing Policy
 
-This project signs and distributes its Windows release artifacts.
+[← Back to README](README.md)
 
-## What is signed
+## Current status
 
-- The Windows installer package (`HOTS_Hosts_setup.exe`), built with Inno Setup
-  and published on the [GitHub Releases](https://github.com/darsono6/HOTS/releases)
-  page for each tagged version.
+HOTS Hosts is currently distributed as an open-source project, but the Windows release installer is **not currently signed with a trusted commercial code-signing certificate**.
 
-## Signing provider
+The project previously applied to the SignPath Foundation program. The application was not approved at that time because the project did not yet meet the Foundation program's public visibility and adoption criteria.
 
-We are applying to the [SignPath Foundation](https://signpath.org) for free
-code signing of open source projects.
+The project may reapply in the future as its community adoption and external visibility grow.
 
-Planned statement (once approved, as required by the program):
-"Free code signing provided by [SignPath.io](https://signpath.io), certificate
-by [SignPath Foundation](https://signpath.org)"
+## Release artifact
 
-Status: pending approval.
+The primary Windows release artifact is:
 
-## Build and signing process
+- `HOTS_Hosts_setup.exe`
 
-- All release artifacts are built exclusively via GitHub Actions
-  (`.github/workflows/build-release.yml`), triggered by pushing a version tag
-  (e.g. `v2.1`).
-- The build compiles the Python source with [Nuitka](https://nuitka.net/) in
-  standalone mode, then packages the result with
-  [Inno Setup](https://jrsoftware.org/isinfo.php).
-- Only artifacts built by this CI pipeline, directly from this public
-  repository's source code, are ever submitted for signing. No locally built
-  binaries are signed.
-- The private signing key is held and managed by SignPath (HSM-backed). This
-  project does not have access to, or store, the private key.
+Release artifacts are published through the project's GitHub Releases page:
 
-## Team roles
+https://github.com/darsono6/HOTS/releases
 
-Single-maintainer project:
+## Build process
 
-- Author / sole committer: [@darsono6](https://github.com/darsono6)
+Release builds are produced through GitHub Actions.
+
+The intended build pipeline:
+
+1. builds the application from the public repository source;
+2. compiles/packages the Python application for Windows;
+3. creates the Windows installer with Inno Setup;
+4. publishes the release artifact through GitHub Releases.
+
+The project does not intentionally use locally built binaries as official release artifacts.
+
+## Source transparency
+
+The source code used to build HOTS Hosts is publicly available in this repository.
+
+Users who do not want to run an unsigned pre-built executable can inspect the source and build the application themselves.
+
+## Why Windows may show a SmartScreen warning
+
+Because the current release does not have a trusted commercial code-signing certificate and the project has limited download reputation, Windows SmartScreen may display a warning such as:
+
+> Windows protected your PC
+
+This warning should not be treated as proof that a file is safe or unsafe.
+
+Users should obtain release binaries only from the official GitHub Releases page and should verify the release version before running them.
+
+## Future signing
+
+If HOTS Hosts is accepted into a trusted open-source code-signing program or obtains another trusted signing certificate, this document will be updated with:
+
+- the signing provider;
+- the certificate identity;
+- the official signing workflow;
+- verification instructions;
+- the date from which signed releases apply.
+
+Until then, release binaries should be considered **unsigned**.
+
+## Maintainer
+
+HOTS Hosts is currently maintained by:
+
+- GitHub: https://github.com/darsono6/HOTS
+- Maintainer: Darsono (`@darsono6`)
