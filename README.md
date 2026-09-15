@@ -237,7 +237,7 @@ Found a security issue? Please report it privately rather than opening a public 
 
 If HOTS Hosts saves you time or you simply want to say thanks:
 
-<a href="https://ko-fi.com/darsono"><img src="hosts_editor/assets/kofi_badge_dark.png" alt="Support me on Ko-fi" width="200"/></a>
+<a href="https://ko-fi.com/darsono"><img src="hosts_editor/graphic/support_me_on_kofi_dark.png" alt="Support me on Ko-fi" width="200"/></a>
 
 **Website:** [hotstools.com](https://hotstools.com)
 **Ko-fi:** [ko-fi.com/darsono](https://ko-fi.com/darsono)
