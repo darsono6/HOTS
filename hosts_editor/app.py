@@ -7,16 +7,18 @@ import math
 import ctypes
 import ctypes.wintypes
 import difflib
+import shiboken6
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
     QLabel, QFrame, QLineEdit, QTableView,
     QHeaderView, QAbstractItemView, QScrollArea, QSizePolicy,
     QTextEdit, QMenu, QApplication, QFileDialog, QStyledItemDelegate,
+    QGraphicsOpacityEffect,
 )
 from PySide6.QtCore import (
     Qt, QThread, Signal, QTimer, QPoint, QSize, QRect, QObject, QProcess,
-    QAbstractTableModel, QModelIndex,
+    QAbstractTableModel, QModelIndex, QPropertyAnimation, QEasingCurve,
 )
 from PySide6.QtGui import (
     QColor, QFont, QIcon, QPixmap, QAction, QSyntaxHighlighter, QTextCharFormat, QPalette,
@@ -42,7 +44,7 @@ except ImportError:
 from .constants import DARK, HOSTS_PATH, IS_LIGHT_THEME, accent_rgba, load_settings, save_settings
 from .i18n import T, set_lang, current_lang, LANGUAGES
 from .core import (
-    parse_hosts, save_hosts, entries_to_text, list_backups,
+    parse_hosts, save_hosts, entries_to_text,
     import_from_path, export_to_path, is_valid_ip, MAX_ACTIVE_ENTRIES,
     HostsBusyError, _looks_like_malformed_entry, _looks_like_entry,
 )
@@ -365,6 +367,7 @@ class HostsEditor(FluentWindow):
         set_lang(self._settings.get("language", "en"))
         self.entries: list = []
         self._dirty  = False
+        self._saved_text = ""
         self._raw_mode = False
         self._bg_signal_objs: list = []
         self._watchdog_scanning = False
@@ -433,6 +436,8 @@ class HostsEditor(FluentWindow):
         QTimer.singleShot(1500, self._check_hosts_lock_watchdog)
         QTimer.singleShot(1500, self._check_appblock_watchdog)
         QTimer.singleShot(1500, self._check_doh_watchdog)
+        if str(self._settings.get("check_updates_on_startup", "1")).strip().lower() in ("1", "true", "yes"):
+            QTimer.singleShot(2500, self._check_updates_silently)
 
         try:
             hwnd = int(self.winId())
@@ -465,17 +470,19 @@ class HostsEditor(FluentWindow):
                     p_sd = None
                 if not handle:
                     return
-                INFINITE = 0xFFFFFFFF
+                POLL_MS = 500
                 WAIT_OBJECT_0 = 0x0
+                WAIT_TIMEOUT = 0x102
                 handles = (ctypes.wintypes.HANDLE * 2)(handle, shutdown_handle)
                 while True:
                     result = _k32.WaitForMultipleObjects(
-                        2, handles, False, INFINITE
+                        2, handles, False, POLL_MS
                     )
-                    if result != WAIT_OBJECT_0:
-
-                        break
                     if is_shutting_down():
+                        break
+                    if result == WAIT_TIMEOUT:
+                        continue
+                    if result != WAIT_OBJECT_0:
                         break
                     self._ext_activate_signals.activate.emit()
             except Exception as e:
@@ -681,6 +688,45 @@ class HostsEditor(FluentWindow):
             parent=self,
         )
 
+    def _check_updates_silently(self):
+        from .dialogs._about_shared import _UpdateCheckWorker
+        worker = _UpdateCheckWorker(self)
+        self._startup_update_worker = worker
+        worker.finished_ok.connect(self._on_startup_update_check_ok)
+        worker.failed.connect(lambda err: None)
+        worker.finished.connect(worker.deleteLater)
+        register_qthread(worker)
+        worker.start()
+
+    def _on_startup_update_check_ok(self, tag: str, url: str):
+        if is_shutting_down() or not shiboken6.isValid(self):
+            return
+        from .dialogs._about_shared import _parse_version, APP_VERSION
+        if _parse_version(tag) > _parse_version(APP_VERSION):
+            self._show_update_available_hud(tag, url)
+            about_page = getattr(self, "_about_page", None)
+            if about_page is not None and shiboken6.isValid(about_page):
+                about_page.apply_known_update(tag, url)
+
+    def _show_update_available_hud(self, tag: str, url: str):
+        self._dismiss_update_hud()
+        self._update_release_url = url
+        self._update_infobar = InfoBar.info(
+            title=T("update_hud_title"),
+            content=T("update_hud_msg", version=tag),
+            orient=Qt.Horizontal,
+            isClosable=True,
+            duration=-1,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _dismiss_update_hud(self):
+        ib = getattr(self, "_update_infobar", None)
+        if ib is not None and shiboken6.isValid(ib):
+            ib.close()
+        self._update_infobar = None
+
     def _check_hosts_lock_watchdog(self):
         signals = _HostsLockWatchdogSignals(self)
         signals.done.connect(self._on_hosts_lock_watchdog_checked)
@@ -701,6 +747,14 @@ class HostsEditor(FluentWindow):
         if is_shutting_down():
             return
         try:
+            if result is not None:
+                self._refresh_toolbar_status_ui()
+                page = getattr(self, "_parental_page", None)
+                if page is not None and hasattr(page, "apply_hosts_lock_drift_result"):
+                    try:
+                        page.apply_hosts_lock_drift_result(result)
+                    except Exception as e:
+                        print(f"Hosts lock watchdog warning: {e}")
             if result == "regressed":
                 InfoBar.warning(
                     title=T("hosts_lock_watchdog_title"),
@@ -859,10 +913,15 @@ class HostsEditor(FluentWindow):
             if pix.isNull():
                 return
 
+            dpr = self.devicePixelRatioF() or 1.0
+
             margin = 6
             scale_factor = 0.50
             target_h = max(int((tb.height() - margin) * scale_factor), 12)
-            scaled = pix.scaledToHeight(target_h, Qt.SmoothTransformation)
+            scaled = pix.scaledToHeight(
+                max(math.ceil(target_h * dpr), 1), Qt.SmoothTransformation
+            )
+            scaled.setDevicePixelRatio(dpr)
 
             self._logo_lbl = QLabel(tb)
             self._logo_lbl.setPixmap(scaled)
@@ -1073,10 +1132,15 @@ class HostsEditor(FluentWindow):
                 HOTSDialog.info(self, T("hosts_lock_title"), T("hosts_lock_blocks_write"))
 
         hov_frame.clicked.connect(_on_hov_frame_clicked)
-        hov_lay = QHBoxLayout(hov_frame)
+
+        hov_content = QWidget(hov_frame)
+        hov_lay = QHBoxLayout(hov_content)
         hov_lay.setContentsMargins(10, 0, 10, 0)
         hov_lay.setSpacing(8)
         hov_lay.setAlignment(Qt.AlignCenter)
+        outer_hov_lay = QHBoxLayout(hov_frame)
+        outer_hov_lay.setContentsMargins(0, 0, 0, 0)
+        outer_hov_lay.addWidget(hov_content)
 
         hov_icon_lbl = QLabel()
         hov_icon_lbl.setFixedSize(18, 18)
@@ -1089,6 +1153,19 @@ class HostsEditor(FluentWindow):
             f"color: {DARK['fg2']}; font-size: 10pt; background: transparent; border: none;"
         )
         hov_lay.addWidget(hov_text_lbl)
+
+        hov_opacity = QGraphicsOpacityEffect(hov_content)
+        hov_opacity.setOpacity(0.0)
+        hov_content.setGraphicsEffect(hov_opacity)
+        hov_fade_anim = QPropertyAnimation(hov_opacity, b"opacity", hov_content)
+        hov_fade_anim.setDuration(160)
+        hov_fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        def _fade_hov_to(target: float):
+            hov_fade_anim.stop()
+            hov_fade_anim.setStartValue(hov_opacity.opacity())
+            hov_fade_anim.setEndValue(target)
+            hov_fade_anim.start()
 
         def _apply_hov_static_style():
             hov_frame.set_style(DARK['border_faint'], DARK['border_soft'], border_width=1, radius=8)
@@ -1110,6 +1187,7 @@ class HostsEditor(FluentWindow):
                 f"color: {color}; font-size: 10pt; font-weight: 600;"
                 f" background: transparent; border: none;"
             )
+            _fade_hov_to(1.0)
 
         def _clear_hov():
 
@@ -1126,6 +1204,7 @@ class HostsEditor(FluentWindow):
                     f"color: {DARK['accent']}; font-size: 10pt; font-weight: 600;"
                     f" background: transparent; border: none;"
                 )
+                _fade_hov_to(1.0)
                 return
             if HostsLockManager.is_active():
                 try:
@@ -1136,6 +1215,7 @@ class HostsEditor(FluentWindow):
                     hov_icon_lbl.clear()
                 hov_text_lbl.setText("")
                 hov_text_lbl.setVisible(False)
+                _fade_hov_to(1.0)
                 return
             hov_icon_lbl.setFixedSize(18, 18)
             hov_icon_lbl.clear()
@@ -1145,6 +1225,7 @@ class HostsEditor(FluentWindow):
                 f"color: {DARK['fg2']}; font-size: 10pt;"
                 f" background: transparent; border: none;"
             )
+            _fade_hov_to(0.0)
 
         self._hov_pulse_timer = QTimer(bar)
         self._hov_pulse_phase = 0.0
@@ -1181,6 +1262,12 @@ class HostsEditor(FluentWindow):
 
         self._refresh_toolbar_status_ui = _refresh_toolbar_status_ui
         self._clear_hov = _clear_hov
+
+        def _resync_hov_after_nav_change(_mode=None):
+            hov_content.update()
+            hov_frame.update()
+
+        self.navigationInterface.displayModeChanged.connect(_resync_hov_after_nav_change)
 
         self._hov_filters: list = []
 
@@ -1298,17 +1385,6 @@ class HostsEditor(FluentWindow):
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
-        self.table.horizontalHeader().sectionResized.connect(self._prevent_slider_escape)
-
-        _saved_widths = self._load_table_col_widths()
-        self.table.setColumnWidth(0, _saved_widths[0])
-        self.table.setColumnWidth(1, _saved_widths[1])
-        self.table.setColumnWidth(2, _saved_widths[2])
-        self.table.verticalHeader().setDefaultSectionSize(40)
-
         self.table.setStyleSheet(
             f"QTableView {{ background-color: {DARK['table_bg']}; alternate-background-color: {DARK['table_alt_bg']}; "
             f"color: {DARK['fg']}; gridline-color: {DARK['grid_line']}; border: 1px solid {DARK['border_soft']}; border-radius: 6px; "
@@ -1328,6 +1404,35 @@ class HostsEditor(FluentWindow):
             f"QHeaderView::section:last {{ border-right: none; border-top-right-radius: 6px; }}"
             f"QHeaderView::section:hover {{ color: {DARK['fg']}; }}"
         )
+
+        hdr_fm = self.table.horizontalHeader().fontMetrics()
+        PAD = 28
+        SORT_ARROW = "  ⇅"
+        SORT_ICON_RESERVE = 9 + 10
+
+        def _hdr_w(label: str) -> int:
+            text_w = hdr_fm.horizontalAdvance(label)
+            arrow_text_w = hdr_fm.horizontalAdvance(SORT_ARROW)
+            return text_w + max(arrow_text_w, SORT_ICON_RESERVE) + PAD
+
+        status_w = max(
+            _hdr_w(T("col_status")),
+            hdr_fm.horizontalAdvance(T("status_active")) + PAD,
+            hdr_fm.horizontalAdvance(T("status_disabled")) + PAD,
+        )
+        self._MIN_COL_WIDTHS = {0: status_w, 1: _hdr_w(T("col_ip")), 2: _hdr_w(T("col_hostname"))}
+        self._min_comment_col_width = _hdr_w(T("col_comment"))
+
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
+        self.table.horizontalHeader().sectionResized.connect(self._prevent_slider_escape)
+
+        _saved_widths = self._load_table_col_widths()
+        self.table.setColumnWidth(0, max(_saved_widths[0], self._MIN_COL_WIDTHS[0]))
+        self.table.setColumnWidth(1, max(_saved_widths[1], self._MIN_COL_WIDTHS[1]))
+        self.table.setColumnWidth(2, max(_saved_widths[2], self._MIN_COL_WIDTHS[2]))
+        self.table.verticalHeader().setDefaultSectionSize(40)
 
         self.table.setItemDelegate(_NoFocusDelegate(self.table))
         self.table.horizontalHeader().sectionClicked.connect(self._sort_col)
@@ -1349,6 +1454,16 @@ class HostsEditor(FluentWindow):
         self._table_click_lock_guard = _TableClickLockGuard(self.table.viewport())
         self.table.viewport().installEventFilter(self._table_click_lock_guard)
 
+        class _TableResizeGuard(QObject):
+            def eventFilter(self_, obj, event):
+                from PySide6.QtCore import QEvent
+                if event.type() == QEvent.Type.Resize:
+                    QTimer.singleShot(0, self._adjust_columns_on_resize)
+                return False
+
+        self._table_resize_guard = _TableResizeGuard(self.table)
+        self.table.installEventFilter(self._table_resize_guard)
+
         lay.addWidget(self.table)
 
         return wrapper
@@ -1358,7 +1473,7 @@ class HostsEditor(FluentWindow):
             return
 
         viewport_width = self.table.viewport().width()
-        min_comment_col_width = 50
+        min_comment_col_width = self._min_comment_col_width
 
         other_widths = 0
         for i in range(3):
@@ -1367,8 +1482,14 @@ class HostsEditor(FluentWindow):
 
         max_allowed_width = viewport_width - other_widths - min_comment_col_width
 
-        min_safe_width = 40
-        max_allowed_width = max(min_safe_width, max_allowed_width)
+        min_w = self._MIN_COL_WIDTHS.get(logicalIndex, 40)
+        max_allowed_width = max(min_w, max_allowed_width)
+
+        if newSize < min_w:
+            self.table.horizontalHeader().blockSignals(True)
+            self.table.setColumnWidth(logicalIndex, min_w)
+            self.table.horizontalHeader().blockSignals(False)
+            return
 
         if newSize > max_allowed_width:
             self.table.horizontalHeader().blockSignals(True)
@@ -1386,17 +1507,16 @@ class HostsEditor(FluentWindow):
         w2 = self.table.columnWidth(2)
 
         total_interactive = w0 + w1 + w2
-        min_comment_col_width = 50
-        min_safe_width = 40
+        min_comment_col_width = self._min_comment_col_width
 
         max_allowed = viewport_width - min_comment_col_width
 
         if total_interactive > max_allowed and max_allowed > 0:
             scale = max_allowed / total_interactive
 
-            new_w0 = max(min_safe_width, int(w0 * scale))
-            new_w1 = max(min_safe_width, int(w1 * scale))
-            new_w2 = max(min_safe_width, max_allowed - new_w0 - new_w1)
+            new_w0 = max(self._MIN_COL_WIDTHS[0], int(w0 * scale))
+            new_w1 = max(self._MIN_COL_WIDTHS[1], int(w1 * scale))
+            new_w2 = max(self._MIN_COL_WIDTHS[2], max_allowed - new_w0 - new_w1)
 
             self.table.horizontalHeader().blockSignals(True)
             self.table.setColumnWidth(0, new_w0)
@@ -1542,7 +1662,10 @@ class HostsEditor(FluentWindow):
         self._raw_highlight_current_line()
 
     def _raw_on_modified(self):
-        self._mark_dirty()
+        if self._raw_editor.toPlainText().rstrip("\n") == self._saved_text.rstrip("\n"):
+            self._mark_clean()
+        else:
+            self._mark_dirty()
 
     def _build_status_bar(self) -> QWidget:
         bar = QFrame()
@@ -1574,13 +1697,22 @@ class HostsEditor(FluentWindow):
         search_frame.setFixedHeight(34)
         search_frame.setMinimumWidth(165)
         search_frame.setMaximumWidth(255)
-        search_frame.setStyleSheet(
+        _search_frame_style_normal = (
             f"#statusSearch {{"
             f"  background-color: {DARK['search_frame_bg']};"
             f"  border: 1px solid {DARK['border_soft2']};"
-            f"  border-radius: 17px;"
+            f"  border-radius: 6px;"
             f"}}"
         )
+        _search_frame_style_focus = (
+            f"#statusSearch {{"
+            f"  background-color: {DARK['search_frame_bg']};"
+            f"  border: 1px solid {DARK['border_soft2']};"
+            f"  border-bottom: 2px solid {DARK['accent']};"
+            f"  border-radius: 6px;"
+            f"}}"
+        )
+        search_frame.setStyleSheet(_search_frame_style_normal)
         sf_lay = QHBoxLayout(search_frame)
         sf_lay.setContentsMargins(10, 0, 8, 0)
         sf_lay.setSpacing(6)
@@ -1606,6 +1738,18 @@ class HostsEditor(FluentWindow):
         attach_line_edit_context_menu(self._search_edit)
         self._search_edit.textChanged.connect(self._on_search)
         sf_lay.addWidget(self._search_edit, 1)
+
+        class _SearchFocusFilter(QObject):
+            def eventFilter(self_, obj, event):
+                from PySide6.QtCore import QEvent
+                if event.type() == QEvent.Type.FocusIn:
+                    search_frame.setStyleSheet(_search_frame_style_focus)
+                elif event.type() == QEvent.Type.FocusOut:
+                    search_frame.setStyleSheet(_search_frame_style_normal)
+                return False
+
+        self._search_focus_filter = _SearchFocusFilter(self._search_edit)
+        self._search_edit.installEventFilter(self._search_focus_filter)
 
         self._search_count = QLabel("")
         self._search_count.setStyleSheet(
@@ -1679,10 +1823,8 @@ class HostsEditor(FluentWindow):
         real = [e for e in self.entries if e["enabled"] is not None]
         on   = sum(1 for e in real if e["enabled"])
         off  = len(real) - on
-        baks = len(list_backups(HOSTS_PATH))
         self.status_bar.setText(
             f"{T('status_entries', total=len(real), active=on, disabled=off)}"
-            f"   |   {T('status_backups', n=baks)}"
         )
 
     def _on_search(self):
@@ -1692,7 +1834,7 @@ class HostsEditor(FluentWindow):
             self._refresh_table()
 
     def _search_raw_text(self):
-        from PySide6.QtGui import QTextCursor, QTextDocument
+        from PySide6.QtGui import QTextCursor
         query = self._search_edit.text().strip()
 
         if not query:
@@ -1710,7 +1852,7 @@ class HostsEditor(FluentWindow):
         cursor = self._raw_editor.textCursor()
         cursor.movePosition(QTextCursor.Start)
         self._raw_editor.setTextCursor(cursor)
-        found = self._raw_editor.find(query, QTextDocument.FindFlags())
+        found = self._raw_editor.find(query)
         if not found:
             cursor = self._raw_editor.textCursor()
             cursor.clearSelection()
@@ -1755,9 +1897,16 @@ class HostsEditor(FluentWindow):
             self._save_btn.set_accent(True)
 
     def _mark_clean(self):
+        self._saved_text = entries_to_text(self.entries)
         if self._dirty:
             self._dirty = False
             self._save_btn.set_accent(False)
+
+    def _mark_dirty_if_changed(self):
+        if entries_to_text(self.entries) == self._saved_text:
+            self._mark_clean()
+        else:
+            self._mark_dirty()
 
     def _add(self):
         from .dialogs import EntryDialog
@@ -1780,7 +1929,7 @@ class HostsEditor(FluentWindow):
                 return
 
         self.entries = candidate
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _edit(self):
         idx = self._selected_idx()
@@ -1792,7 +1941,7 @@ class HostsEditor(FluentWindow):
         dlg.exec()
         if dlg.result:
             self.entries[idx] = dlg.result
-            self._refresh_table(); self._update_status(); self._mark_dirty()
+            self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _toggle(self):
         indices = self._selected_indices()
@@ -1802,14 +1951,13 @@ class HostsEditor(FluentWindow):
         any_off = any(not self.entries[i]["enabled"] for i in indices)
         for i in indices:
             self.entries[i]["enabled"] = any_off
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _delete(self):
         if self._raw_mode:
             cursor = self._raw_editor.textCursor()
             if cursor.hasSelection():
                 cursor.removeSelectedText()
-            self._mark_dirty()
             return
 
         indices = self._selected_indices()
@@ -1832,7 +1980,7 @@ class HostsEditor(FluentWindow):
             return
         for i in sorted(indices, reverse=True):
             self.entries.pop(i)
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _set_zero_ip(self):
         indices = self._selected_indices()
@@ -1846,7 +1994,7 @@ class HostsEditor(FluentWindow):
                 changed = True
         if not changed:
             return
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _save(self):
         if self._raw_mode:
@@ -1934,7 +2082,7 @@ class HostsEditor(FluentWindow):
                 return
 
         self.entries = new_entries
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _export(self):
         from .dialogs import ExportOptionsDialog
@@ -2009,24 +2157,6 @@ class HostsEditor(FluentWindow):
     def _select_all(self):
         self.table.selectAll()
 
-    @staticmethod
-    def _entries_semantically_equal(a: list, b: list) -> bool:
-        if len(a) != len(b):
-            return False
-        for ea, eb in zip(a, b):
-            if ea.get("enabled") is None or eb.get("enabled") is None:
-                if ea.get("enabled") != eb.get("enabled"):
-                    return False
-                if ea.get("raw", "") != eb.get("raw", ""):
-                    return False
-            else:
-                if (ea.get("enabled") != eb.get("enabled")
-                        or ea.get("ip", "") != eb.get("ip", "")
-                        or ea.get("hostname", "") != eb.get("hostname", "")
-                        or ea.get("comment", "") != eb.get("comment", "")):
-                    return False
-        return True
-
     def _commit_raw_text(self) -> bool:
         from .core import parse_hosts as _ph
         import tempfile
@@ -2036,11 +2166,8 @@ class HostsEditor(FluentWindow):
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(raw_text)
             new_entries = _ph(tmp)
-            if not self._entries_semantically_equal(new_entries, self.entries):
-                self.entries = new_entries
-                self._mark_dirty()
-            else:
-                self.entries = new_entries
+            self.entries = new_entries
+            self._mark_dirty_if_changed()
             return True
         except Exception as ex:
             HOTSDialog.error(self, T("parse_err_title"), T("raw_commit_err_msg", error=str(ex)))
@@ -2050,9 +2177,6 @@ class HostsEditor(FluentWindow):
                 os.unlink(tmp)
             except Exception:
                 pass
-
-    def _raw_view_active(self) -> bool:
-        return self._raw_widget.isVisible()
 
     def _show_table_view(self):
         if self._raw_mode:
@@ -2152,7 +2276,7 @@ class HostsEditor(FluentWindow):
             return
 
         self.entries = fixed_entries
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
         report = [T("repair_done_header")]
         if wildcards_fixed: report.append(T("repair_wildcards",  n=wildcards_fixed))
@@ -2247,7 +2371,7 @@ class HostsEditor(FluentWindow):
 
     def _remove_by_hostnames(self, hostnames: set):
         self.entries = [e for e in self.entries if e["hostname"].lower() not in hostnames]
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _remove_by_entries(self, pairs: set):
 
@@ -2256,7 +2380,7 @@ class HostsEditor(FluentWindow):
             e for e in self.entries
             if (e["hostname"].lower(), e["ip"]) not in wanted
         ]
-        self._refresh_table(); self._update_status(); self._mark_dirty()
+        self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _open_parental_control(self):
         self.switchTo(self._parental_page)

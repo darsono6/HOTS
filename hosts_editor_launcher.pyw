@@ -1,20 +1,6 @@
 import sys, os, traceback, ctypes
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Tryb weryfikacji hasla wywolywany przez deinstalator (Inno Setup), ZANIM
-# cokolwiek innego sie wykona - bez logowania, bez elewacji, bez ladowania
-# PySide6/GUI. Ma byc szybki i nie wymagac uprawnien administratora (odczyt
-# HKLM\Software\HOTS Hosts jest domyslnie dostepny do odczytu dla kazdego).
-#
-# Wywolanie: HostsEditor.exe --verify-uninstall-password "<sciezka_do_pliku_z_haslem>"
-# Kod wyjscia: 0 = haslo poprawne (lub brak ustawionego hasla - nic nie
-#              blokujemy), 1 = haslo bledne lub blad odczytu.
-#
-# UWAGA: klucz/wartosc rejestru ("Software\HOTS Hosts" / "AppPasswordHash")
-# musza byc identyczne jak w hosts_editor/__main__.py (REG_KEY/REG_VAL) -
-# jesli zmienisz jedno, zmien i drugie.
-# ---------------------------------------------------------------------------
 if len(sys.argv) >= 3 and sys.argv[1] == "--verify-uninstall-password":
     def _verify_uninstall_password() -> int:
         import hashlib
@@ -39,7 +25,7 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--verify-uninstall-password":
             stored_hash = ""
 
         if not stored_hash:
-            return 0  # haslo nie jest ustawione - nie blokujemy
+            return 0
 
         entered_hash = hashlib.sha256(entered.encode("utf-8")).hexdigest()
         return 0 if entered_hash == stored_hash else 1
@@ -183,9 +169,6 @@ def _focus_existing_instance():
 def _relaunch_as_admin():
     is_frozen = getattr(sys, "frozen", False) or "__compiled__" in globals()
     if is_frozen:
-        # NOTE: sys.executable is unreliable in this Nuitka build (it can
-        # report a non-existent "python.exe" instead of the real renamed
-        # output exe) — sys.argv[0] is the actual running executable path.
         target = sys.argv[0]
         params = " ".join(f'"{a}"' for a in sys.argv[1:])
     else:

@@ -209,10 +209,4 @@ class PasswordPromptDialog(HOTSDialog):
             return
         
         super().accept()
-        # Budowa glownego okna (HostsEditor) jest ciezka (nawigacja, wszystkie
-        # strony, wczytanie hosts) i jest wywolywana z tego samego slotu, co
-        # zamkniecie tego dialogu. Bez odlozenia o jeden obieg petli zdarzen,
-        # ta ciezka konstrukcja startuje zanim Qt zdazy w pelni domalowac
-        # zamkniecie dialogu, co widac jako inne (gorsze) rysowanie okna
-        # glownego przy starcie z hastem niz bez hasla.
         QTimer.singleShot(0, self._on_success)

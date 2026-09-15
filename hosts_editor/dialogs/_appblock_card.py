@@ -381,7 +381,8 @@ class _AppBlockCardMixin:
 
         def add_rows(section_apps):
             for app in section_apps:
-                row = _AppBlockRow(app.exe_name, app.display_name, app.enabled,
+                label = T("priv_rstrui_lock_title") if app.exe_name == "rstrui.exe" else app.display_name
+                row = _AppBlockRow(app.exe_name, label, app.enabled,
                                     on_remove=lambda exe, s=state: self._appblock_remove(s, exe),
                                     on_toggle=lambda exe, val, s=state: self._appblock_toggle(s, exe, val))
                 container.addWidget(row)

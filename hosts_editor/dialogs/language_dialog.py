@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QButtonGroup, QRadioButton
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QWidget, QButtonGroup, QRadioButton
 from PySide6.QtCore import Qt
 
 from qfluentwidgets import FluentIcon as FIF
@@ -10,7 +10,7 @@ from ..i18n import T, current_lang, LANGUAGES
 
 class LanguageDialog(HOTSDialog):
     def __init__(self, parent=None):
-        super().__init__(parent, T("lang_title"), min_width=320, min_height=320)
+        super().__init__(parent, T("lang_title"), min_width=380, min_height=220)
         self.chosen = None
         self._build()
         self.adjustSize()
@@ -21,11 +21,15 @@ class LanguageDialog(HOTSDialog):
         cl.setContentsMargins(28, 24, 28, 16)
         cl.setSpacing(12)
 
-        flags = {"en": "🇬🇧", "pl": "🇵🇱", "fr": "🇫🇷", "de": "🇩🇪", "es": "🇪🇸"}
+        flags = {"en": "🇬🇧", "pl": "🇵🇱", "fr": "🇫🇷", "de": "🇩🇪", "es": "🇪🇸", "pt": "🇵🇹", "ru": "🇷🇺"}
         self._group = QButtonGroup(self)
         self._radios = {}
 
-        for code, name in LANGUAGES.items():
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(8)
+        cols = 2
+        for i, (code, name) in enumerate(LANGUAGES.items()):
             rb = QRadioButton(f"{flags.get(code, '')}  {name}")
             rb.setStyleSheet(
                 f"QRadioButton {{ color: {DARK['fg']}; background: transparent; spacing: 12px; font-size: 10pt; padding: 4px 0px; }}\n"
@@ -37,7 +41,9 @@ class LanguageDialog(HOTSDialog):
                 rb.setChecked(True)
             self._group.addButton(rb)
             self._radios[rb] = code
-            cl.addWidget(rb)
+            grid.addWidget(rb, i // cols, i % cols)
+
+        cl.addLayout(grid)
 
         cl.addStretch()
         cl.addWidget(h_separator())

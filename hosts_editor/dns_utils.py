@@ -6,7 +6,7 @@ import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-from .core_antispy import CREATE_NO_WINDOW, _console_encoding
+from .core_antispy import CREATE_NO_WINDOW, _console_encoding, NETSH_EXE
 
 CF_FAMILY_PRIMARY   = "1.1.1.3"
 CF_FAMILY_SECONDARY = "1.0.0.3"
@@ -91,9 +91,10 @@ def get_active_interfaces() -> list[str]:
 def get_dns_for_interface(iface: str) -> list[str]:
     try:
         out = subprocess.check_output(
-            ["netsh", "interface", "ip", "show", "dns", f"name={iface}"],
+            [NETSH_EXE, "interface", "ip", "show", "dns", f"name={iface}"],
             text=True, encoding=_console_encoding(), errors="replace",
-            creationflags=CREATE_NO_WINDOW
+            creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
     except Exception:
         return []
@@ -112,21 +113,24 @@ def set_dns_for_interface(iface: str, servers: list[str]) -> bool:
     try:
         if not servers:
             subprocess.check_call(
-                ["netsh", "interface", "ip", "set", "dns",
+                [NETSH_EXE, "interface", "ip", "set", "dns",
                  f"name={iface}", "source=dhcp"],
-                creationflags=CREATE_NO_WINDOW
+                creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
         else:
             subprocess.check_call(
-                ["netsh", "interface", "ip", "set", "dns",
+                [NETSH_EXE, "interface", "ip", "set", "dns",
                  f"name={iface}", "static", servers[0], "primary"],
-                creationflags=CREATE_NO_WINDOW
+                creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             for idx, srv in enumerate(servers[1:], start=2):
                 subprocess.check_call(
-                    ["netsh", "interface", "ip", "add", "dns",
+                    [NETSH_EXE, "interface", "ip", "add", "dns",
                      f"name={iface}", srv, f"index={idx}"],
-                    creationflags=CREATE_NO_WINDOW
+                    creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
         return True
     except Exception:

@@ -3,14 +3,12 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'          # runs on tags like v2.1.0
-  workflow_dispatch:    # also allows manual run from the Actions tab
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
-    permissions:
-      contents: write   # required so the workflow can create a GitHub Release
 
     steps:
       - name: Checkout repo
@@ -19,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'   # match the version you use locally
+          python-version: '3.13'
 
       - name: Install dependencies
         run: |
@@ -30,14 +28,15 @@ jobs:
       - name: Build with Nuitka
         run: |
           python -m nuitka --standalone --msvc=latest --windows-console-mode=disable `
-            --assume-yes-for-downloads `
             --windows-icon-from-ico="icon.ico" `
             --output-filename="HOTS Hosts.exe" `
             --output-dir=dist `
-            --include-data-files="hosts_editor/logo.png=logo.png" `
-            --include-data-files="hosts_editor/logo1.png=logo1.png" `
-            --include-data-files="hosts_editor/logo.ico=logo.ico" `
-            --include-data-files="hosts_editor/logoS.png=logoS.png" `
+            --include-data-files="hosts_editor/graphic/logo.png=graphic/logo.png" `
+            --include-data-files="hosts_editor/graphic/logo1.png=graphic/logo1.png" `
+            --include-data-files="hosts_editor/graphic/logo.ico=graphic/logo.ico" `
+            --include-data-files="hosts_editor/graphic/logoS.png=graphic/logoS.png" `
+            --include-data-files="hosts_editor/graphic/support_me_on_kofi_dark.png=graphic/support_me_on_kofi_dark.png" `
+            --include-data-files="hosts_editor/graphic/paypal_donate_button.png=graphic/paypal_donate_button.png" `
             --include-data-dir="hosts_editor/blocklists=blocklists" `
             --include-package-data=certifi `
             --enable-plugin=pyside6 `
@@ -51,9 +50,6 @@ jobs:
 
       - name: Build installer with Inno Setup
         run: iscc setup.iss
-
-      # The SignPath signing step will go here in the future, between the
-      # build and the upload/release - we'll add it once you're approved.
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -2,6 +2,7 @@ import sys
 import time
 import ctypes
 import math
+import weakref
 from typing import Optional, Union
 
 from PySide6.QtWidgets import (
@@ -216,9 +217,16 @@ class _FluentTipFilter(QObject):
         self._show_timer.timeout.connect(self._show)
         target.installEventFilter(self)
 
-        target.destroyed.connect(self._on_target_destroyed)
+        self_ref = weakref.ref(self)
 
-    def _on_target_destroyed(self, *_args):
+        def _on_target_destroyed(*_args, _ref=self_ref):
+            obj = _ref()
+            if obj is not None:
+                obj._handle_target_destroyed()
+
+        target.destroyed.connect(_on_target_destroyed)
+
+    def _handle_target_destroyed(self, *_args):
         self._show_timer.stop()
         self._hide()
 
@@ -250,7 +258,17 @@ class _FluentTipFilter(QObject):
         popup.setAttribute(Qt.WA_TransparentForMouseEvents)
         popup.setAttribute(Qt.WA_ShowWithoutActivating)
         popup.setAttribute(Qt.WA_DeleteOnClose)
-        popup.destroyed.connect(self._on_popup_destroyed)
+
+        self_ref = weakref.ref(self)
+
+        def _on_popup_destroyed(*_args, _ref=self_ref, _popup=popup):
+            obj = _ref()
+            if obj is not None:
+                obj._handle_popup_destroyed(_popup)
+            else:
+                _open_tip_popups[:] = [p for p in _open_tip_popups if p is not _popup]
+
+        popup.destroyed.connect(_on_popup_destroyed)
 
         outer = QFrame(popup)
         outer.setObjectName("fluentTip")
@@ -285,6 +303,10 @@ class _FluentTipFilter(QObject):
             msg.setFixedWidth(self._width)
         v.addWidget(msg)
 
+        for w in (top_line, spacer, msg, outer):
+            w.ensurePolished()
+        if msg.wordWrap():
+            msg.setMinimumHeight(msg.heightForWidth(msg.width()) + 2)
         outer.adjustSize()
         popup.resize(outer.size())
 
@@ -305,10 +327,10 @@ class _FluentTipFilter(QObject):
         if self._popup is not None:
             self._popup.close()
 
-    def _on_popup_destroyed(self):
-        if self._popup is not None:
-            _open_tip_popups[:] = [p for p in _open_tip_popups if p is not self._popup]
-        self._popup = None
+    def _handle_popup_destroyed(self, popup):
+        if self._popup is popup:
+            self._popup = None
+        _open_tip_popups[:] = [p for p in _open_tip_popups if p is not popup]
 
 def attach_fluent_tip(widget: QWidget, text: str, width: Optional[int] = None) -> _FluentTipFilter:
     existing = getattr(widget, "_fluent_tip_filter", None)
@@ -337,9 +359,17 @@ class _FluentTableTipFilter(QObject):
         self._show_timer = QTimer(self)
         self._show_timer.setSingleShot(True)
         self._show_timer.timeout.connect(self._show)
-        table.destroyed.connect(self._on_target_destroyed)
 
-    def _on_target_destroyed(self, *_args):
+        self_ref = weakref.ref(self)
+
+        def _on_target_destroyed(*_args, _ref=self_ref):
+            obj = _ref()
+            if obj is not None:
+                obj._handle_target_destroyed()
+
+        table.destroyed.connect(_on_target_destroyed)
+
+    def _handle_target_destroyed(self, *_args):
         self._show_timer.stop()
         self._hide()
 
@@ -377,7 +407,17 @@ class _FluentTableTipFilter(QObject):
         popup.setAttribute(Qt.WA_TransparentForMouseEvents)
         popup.setAttribute(Qt.WA_ShowWithoutActivating)
         popup.setAttribute(Qt.WA_DeleteOnClose)
-        popup.destroyed.connect(self._on_popup_destroyed)
+
+        self_ref = weakref.ref(self)
+
+        def _on_popup_destroyed(*_args, _ref=self_ref, _popup=popup):
+            obj = _ref()
+            if obj is not None:
+                obj._handle_popup_destroyed(_popup)
+            else:
+                _open_tip_popups[:] = [p for p in _open_tip_popups if p is not _popup]
+
+        popup.destroyed.connect(_on_popup_destroyed)
 
         outer = QFrame(popup)
         outer.setObjectName("fluentTip")
@@ -409,6 +449,10 @@ class _FluentTableTipFilter(QObject):
         )
         v.addWidget(msg)
 
+        for w in (top_line, spacer, msg, outer):
+            w.ensurePolished()
+        if msg.wordWrap():
+            msg.setMinimumHeight(msg.heightForWidth(msg.width()) + 2)
         outer.adjustSize()
         popup.resize(outer.size())
 
@@ -429,10 +473,10 @@ class _FluentTableTipFilter(QObject):
         if self._popup is not None:
             self._popup.close()
 
-    def _on_popup_destroyed(self):
-        if self._popup is not None:
-            _open_tip_popups[:] = [p for p in _open_tip_popups if p is not self._popup]
-        self._popup = None
+    def _handle_popup_destroyed(self, popup):
+        if self._popup is popup:
+            self._popup = None
+        _open_tip_popups[:] = [p for p in _open_tip_popups if p is not popup]
 
 def attach_fluent_table_tip(table) -> _FluentTableTipFilter:
     existing = getattr(table, "_fluent_table_tip_filter", None)
@@ -878,9 +922,6 @@ class HOTSPage(QWidget):
         if self._busy_label is not None and shiboken6.isValid(self._busy_label):
             self._busy_label.setVisible(False)
 
-    def is_busy(self) -> bool:
-        return self._busy_count > 0
-
     def showEvent(self, event):
         super().showEvent(event)
         self.refresh_content()
@@ -1043,7 +1084,14 @@ class HOTSContextMenu(QWidget):
 
         from PySide6.QtCore import QTimer as _QTimer
         cb = self._callbacks[idx]
-        _QTimer.singleShot(0, lambda: self._finish_click(cb))
+        self_ref = weakref.ref(self)
+
+        def _do_finish_click(_ref=self_ref, _cb=cb):
+            obj = _ref()
+            if obj is not None:
+                obj._finish_click(_cb)
+
+        _QTimer.singleShot(0, _do_finish_click)
 
     def _finish_click(self, cb):
         if is_shutting_down() or not shiboken6.isValid(self):
@@ -1077,7 +1125,14 @@ class HOTSContextMenu(QWidget):
                     if app is not None:
                         app.removeEventFilter(self)
                     from PySide6.QtCore import QTimer as _QTimer
-                    _QTimer.singleShot(0, self._close_outside_click)
+                    self_ref = weakref.ref(self)
+
+                    def _do_close_outside_click(_ref=self_ref):
+                        obj = _ref()
+                        if obj is not None:
+                            obj._close_outside_click()
+
+                    _QTimer.singleShot(0, _do_close_outside_click)
             except Exception:
                 pass
         return False
@@ -1342,35 +1397,6 @@ def enable_rounded_corners(hwnd: int):
             ctypes.wintypes.HWND(hwnd), ctypes.wintypes.DWORD(33),
             ctypes.byref(val), ctypes.wintypes.DWORD(ctypes.sizeof(val))
         )
-    except Exception:
-        pass
-
-def enable_acrylic(hwnd: int, dark: bool = True) -> None:
-    try:
-        import ctypes.wintypes
-        _ensure_dwm_argtypes()
-        build = sys.getwindowsversion().build
-        if build >= 22621:
-            val = ctypes.c_int(2)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                ctypes.wintypes.HWND(hwnd), ctypes.wintypes.DWORD(38),
-                ctypes.byref(val), ctypes.wintypes.DWORD(ctypes.sizeof(val))
-            )
-        elif build >= 22000:
-            val = ctypes.c_int(1)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                ctypes.wintypes.HWND(hwnd), ctypes.wintypes.DWORD(1029),
-                ctypes.byref(val), ctypes.wintypes.DWORD(ctypes.sizeof(val))
-            )
-        else:
-
-            solid_color = 0xFF1A1A2A if dark else 0xFFF2F2F2
-            accent = _DWM_ACCENT_POLICY(1, 0, solid_color, 0)
-            data   = _DWM_WCAD(19, ctypes.cast(ctypes.byref(accent), ctypes.c_void_p),
-                               ctypes.sizeof(accent))
-            ctypes.windll.user32.SetWindowCompositionAttribute(
-                ctypes.wintypes.HWND(hwnd), ctypes.byref(data)
-            )
     except Exception:
         pass
 

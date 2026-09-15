@@ -1,14 +1,14 @@
 import os
 import webbrowser
 
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QGridLayout
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QGridLayout, QCheckBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
 
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import IconWidget
 
-from ..constants import DARK
+from ..constants import DARK, load_settings, save_settings
 from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, colored_svg_icon
 from ..i18n import T
 from ..bg_tasks import register_qthread, is_shutting_down
@@ -34,9 +34,13 @@ class AboutPage(HOTSPage):
         top.setStyleSheet(
             f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
         )
-        top_lay = QHBoxLayout(top)
-        top_lay.setContentsMargins(20, 18, 20, 18)
+        top_outer_lay = QVBoxLayout(top)
+        top_outer_lay.setContentsMargins(20, 18, 20, 14)
+        top_outer_lay.setSpacing(8)
+
+        top_lay = QHBoxLayout()
         top_lay.setSpacing(16)
+        top_outer_lay.addLayout(top_lay)
 
         logo_lbl = QLabel()
         logo_lbl.setStyleSheet("background: transparent; border: none;")
@@ -60,7 +64,7 @@ class AboutPage(HOTSPage):
         sub.setStyleSheet(f"color: {DARK['fg2']}; font-size: 11pt; background: transparent; border: none;")
         col_lay.addWidget(sub)
 
-        ver = QLabel(T("about_version"))
+        ver = QLabel(T("about_version", v=APP_VERSION))
         ver.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent; border: none;")
         col_lay.addWidget(ver)
 
@@ -75,6 +79,24 @@ class AboutPage(HOTSPage):
         self._update_btn.fit_to_content()
         self._update_btn.clicked.connect(self._check_for_updates)
         top_lay.addWidget(self._update_btn, 0, Qt.AlignVCenter)
+
+        cb_row = QHBoxLayout()
+        cb_row.addStretch()
+
+        startup_checked = str(load_settings().get("check_updates_on_startup", "1")).strip().lower() in ("1", "true", "yes")
+        self._update_startup_cb = QCheckBox(T("about_check_update_startup"))
+        self._update_startup_cb.setChecked(startup_checked)
+        self._update_startup_cb.setFocusPolicy(Qt.NoFocus)
+        self._update_startup_cb.setStyleSheet(
+            f"QCheckBox {{ color: {DARK['fg2']}; background: transparent; spacing: 8px; font-size: 8pt; padding: 0px; outline: none; border: none; }}\n"
+            f"QCheckBox:focus {{ outline: none; border: none; }}\n"
+            f"QCheckBox::indicator {{ width: 13px; height: 13px; border: 1px solid {DARK['border']}; border-radius: 3px; background: {DARK['indicator_bg']}; }}\n"
+            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
+            f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
+        )
+        self._update_startup_cb.toggled.connect(self._on_check_update_startup_toggled)
+        cb_row.addWidget(self._update_startup_cb)
+        top_outer_lay.addLayout(cb_row)
 
         cl.addWidget(top)
         cl.addSpacing(6)
@@ -155,7 +177,19 @@ class AboutPage(HOTSPage):
         footer_lay.addStretch()
         cl.addWidget(footer)
 
+    def _on_check_update_startup_toggled(self, checked: bool):
+        fresh = load_settings()
+        fresh["check_updates_on_startup"] = bool(checked)
+        save_settings(fresh)
+
     def _check_for_updates(self):
+        if getattr(self, "_known_update_url", None):
+            webbrowser.open(self._known_update_url)
+            self._known_update_url = None
+            self._update_btn.set_icon(FIF.SYNC, "#60c8ff")
+            self._update_btn.set_label(T("about_check_update"))
+            self._update_btn.fit_to_content()
+            return
         if getattr(self, "_update_worker", None) is not None and self._update_worker.isRunning():
             return
 
@@ -176,7 +210,14 @@ class AboutPage(HOTSPage):
             return
         self._update_worker = None
         self._update_btn.setEnabled(True)
-        self._update_btn.set_label(T("about_check_update"))
+        if not getattr(self, "_known_update_url", None):
+            self._update_btn.set_label(T("about_check_update"))
+        self._update_btn.fit_to_content()
+
+    def apply_known_update(self, tag: str, url: str):
+        self._known_update_url = url
+        self._update_btn.set_icon(FIF.DOWNLOAD, "#60c8ff")
+        self._update_btn.set_label(T("about_download_update"))
         self._update_btn.fit_to_content()
 
     def _on_update_check_ok(self, latest_tag: str, release_url: str):
@@ -184,6 +225,7 @@ class AboutPage(HOTSPage):
         current_v = _parse_version(APP_VERSION)
 
         if latest_v > current_v:
+            self.apply_known_update(latest_tag, release_url)
             open_it = HOTSDialog.ask(
                 self,
                 T("about_update_available_title"),

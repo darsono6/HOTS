@@ -67,7 +67,6 @@ class DiffDialog(HOTSDialog):
         cl.setContentsMargins(12, 10, 12, 10)
         cl.setSpacing(6)
 
-        # --- karta nagłówka: statystyki + przyciski Zapisz/Pomiń/Anuluj ---
         hdr = QWidget()
         hdr.setStyleSheet(self._card_style())
         hdr_lay = QHBoxLayout(hdr)
@@ -130,12 +129,6 @@ class DiffDialog(HOTSDialog):
         self._text.setStyleSheet(
             f"QPlainTextEdit {{ background-color: {DARK['table_bg']}; color: {DARK['fg']}; "
             f"border: none; border-radius: 4px; padding: 10px; }}"
-            # QPlainTextEdit jest QAbstractScrollArea, więc jak tylko dostaje
-            # własny setStyleSheet(), przestaje niezawodnie dziedziczyć
-            # globalny styl QScrollBar z widgets_qt.py (patrz identyczny
-            # komentarz/fix przy tabeli w diagnostics_page.py) — dublujemy
-            # te same reguły lokalnie, żeby suwak wyglądał i zachowywał się
-            # identycznie jak na pozostałych kartach.
             "QScrollBar:vertical {"
             "    background: transparent;"
             "    width: 14px;"

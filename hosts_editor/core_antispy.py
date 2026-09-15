@@ -415,22 +415,6 @@ class AntiSpyManager:
     _op_lock = threading.RLock()
 
     @staticmethod
-    def is_item_flag_active(item_id: str) -> bool:
-        item = _find_item(item_id)
-        if not item:
-            return False
-        loader, _ = _item_store(item)
-        return bool(loader().get(item_id, {}).get("active"))
-
-    @staticmethod
-    def is_item_active(item_id: str) -> bool:
-        item = _find_item(item_id)
-        if not item:
-            return False
-        protected, _missing = AntiSpyManager._item_is_protected(item)
-        return protected
-
-    @staticmethod
     def get_items_status(level: str) -> Dict[str, bool]:
         items = _items_for_level(level)
         machine_cache = _load_machine_items()
@@ -463,22 +447,6 @@ class AntiSpyManager:
     @staticmethod
     def is_basic_active() -> bool:
         return all(AntiSpyManager.get_items_status("basic").values())
-
-    @staticmethod
-    def is_medium_active() -> bool:
-        return all(AntiSpyManager.get_items_status("medium").values())
-
-    @staticmethod
-    def is_advanced_active() -> bool:
-        return all(AntiSpyManager.get_items_status("advanced").values())
-
-    @staticmethod
-    def is_extra_active() -> bool:
-        return all(AntiSpyManager.get_items_status("extra").values())
-
-    @staticmethod
-    def get_status() -> Dict[str, bool]:
-        return {lvl: all(AntiSpyManager.get_items_status(lvl).values()) for lvl in LEVELS}
 
     @staticmethod
     @_serialized

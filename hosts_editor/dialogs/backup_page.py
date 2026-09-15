@@ -14,7 +14,7 @@ from qfluentwidgets import FluentIcon as FIF
 from ..constants import DARK, accent_rgba
 from ..core import list_backups, restore_from_backup, HostsBusyError
 from ..core_antispy import HostsLockError
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_table_tip
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
 
@@ -30,8 +30,7 @@ class BackupManagerPage(HOTSPage):
         self.on_restore = on_restore
         self.on_backup_count_changed = on_backup_count_changed
         self.on_restore_default = on_restore_default
-        self._build()
-        self._refresh()
+        self._built = False
 
     def _card_style(self) -> str:
         return (f"background: {DARK['panel_bg']}; "
@@ -41,6 +40,7 @@ class BackupManagerPage(HOTSPage):
         cl = self.content_layout
 
         sub = QLabel(T("bak_subheader"))
+        sub.setWordWrap(True)
         sub.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent;")
         cl.addWidget(sub)
         cl.addSpacing(10)
@@ -70,8 +70,22 @@ class BackupManagerPage(HOTSPage):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.setColumnWidth(0, 160)
-        self.table.setColumnWidth(1, 80)
+
+        _bak_fm = self.table.horizontalHeader().fontMetrics()
+        _bak_pad = 24
+        _bak_col_gap = 25
+        date_w = max(
+            _bak_fm.horizontalAdvance(T("bak_col_date")),
+            _bak_fm.horizontalAdvance("0000-00-00  00:00:00"),
+        ) + _bak_pad + _bak_col_gap
+        size_w = max(
+            _bak_fm.horizontalAdvance(T("bak_col_size")),
+            _bak_fm.horizontalAdvance("9999.9 KB"),
+        ) + _bak_pad
+        self.table.setColumnWidth(0, date_w)
+        self.table.setColumnWidth(1, size_w)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
 
@@ -132,6 +146,15 @@ class BackupManagerPage(HOTSPage):
             "}"
         )
         table_card_lay.addWidget(self.table)
+        attach_fluent_table_tip(self.table)
+
+        _bak_min_w = max(
+            _bak_fm.horizontalAdvance(T("bak_col_date")) + _bak_pad,
+            _bak_fm.horizontalAdvance(T("bak_col_size")) + _bak_pad,
+            _bak_fm.horizontalAdvance(T("bak_col_file")) + _bak_pad,
+            80,
+        )
+        self.table.horizontalHeader().setMinimumSectionSize(_bak_min_w)
         cl.addWidget(table_card, 1)
 
         act = QWidget()
@@ -166,6 +189,9 @@ class BackupManagerPage(HOTSPage):
         cl.addWidget(self._status)
 
     def refresh_content(self):
+        if not self._built:
+            self._build()
+            self._built = True
         self._refresh()
 
     def _refresh(self):
@@ -181,8 +207,9 @@ class BackupManagerPage(HOTSPage):
                 size_str = f"{size/1024:.1f} KB" if size >= 1024 else f"{size} B"
                 self.table.setItem(row, 0, QTableWidgetItem(dt.strftime("%Y-%m-%d  %H:%M:%S")))
                 self.table.setItem(row, 1, QTableWidgetItem(size_str))
-                item = QTableWidgetItem(str(p))
+                item = QTableWidgetItem(p.name)
                 item.setData(Qt.UserRole, str(p))
+                item.setToolTip(str(p))
                 self.table.setItem(row, 2, item)
         self._status.setText(T("bak_status_count", n=len(self._baks)))
 

@@ -12,9 +12,6 @@ def is_shutting_down() -> bool:
     return _shutting_down.is_set()
 
 def start_bg_thread(target, *args, **kwargs) -> Optional[threading.Thread]:
-    if _shutting_down.is_set():
-        return None
-
     def _wrapper():
         try:
             target(*args, **kwargs)
@@ -27,14 +24,13 @@ def start_bg_thread(target, *args, **kwargs) -> Optional[threading.Thread]:
 
     t = threading.Thread(target=_wrapper, daemon=True)
     with _lock:
+        if _shutting_down.is_set():
+            return None
         _active_threads.append(t)
     t.start()
     return t
 
 def start_bg_timer(interval, target, *args, **kwargs) -> Optional[threading.Timer]:
-    if _shutting_down.is_set():
-        return None
-
     def _wrapper():
         try:
             if is_shutting_down():
@@ -50,6 +46,8 @@ def start_bg_timer(interval, target, *args, **kwargs) -> Optional[threading.Time
     t = threading.Timer(interval, _wrapper)
     t.daemon = True
     with _lock:
+        if _shutting_down.is_set():
+            return None
         _active_threads.append(t)
     t.start()
     return t
@@ -96,10 +94,14 @@ def begin_shutdown_and_wait(total_timeout: float = 6.0,
         except Exception:
             pass
 
+    deadline_q = time.monotonic() + qthread_timeout
     for qt_thread in qthreads:
         try:
             if qt_thread.isRunning():
-                qt_thread.wait(int(qthread_timeout * 1000))
+                remaining_ms = int((deadline_q - time.monotonic()) * 1000)
+                if remaining_ms <= 0:
+                    break
+                qt_thread.wait(remaining_ms)
         except Exception:
             pass
 

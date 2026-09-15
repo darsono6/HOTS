@@ -1,4 +1,4 @@
-HOTS Hosts v2.1
+HOTS Hosts v2.2
 ===============
 
 A Fluent-Design desktop application for managing the Windows hosts file.
@@ -54,7 +54,8 @@ MAIN FEATURES
 - Optional password protection (SHA-256 hash stored machine-wide in the
   Registry) - required both to open the app and to uninstall it
 - Raw hosts file editor with syntax highlighting
-- Available in 5 languages: English, Polish, French, German, Spanish
+- Available in 7 languages: English, Polish, French, German, Spanish,
+  Russian, Portuguese
 
 
 PARENTAL CONTROL - KNOWN LIMITATIONS
@@ -96,6 +97,7 @@ SUPPORT
 -------
 If HOTS Hosts saves you time, or you'd simply like to say thanks:
 
+  Ko-fi:   ko-fi.com/darsono
   PayPal:  paypal.me/darsonodark
   Email:   hots.support@gmail.com
   www:     hotstools.com

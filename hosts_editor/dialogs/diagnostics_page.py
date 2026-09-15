@@ -587,9 +587,6 @@ class DiagnosticsPage(HOTSPage):
                 seen.add(data)
         return seen
 
-    def _selected_hostnames(self) -> set:
-        return {host for host, _ip in self._selected_entries()}
-
     def _warn_hostnames(self) -> set:
         result = set()
         for row in range(self.table.rowCount()):

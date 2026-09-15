@@ -6,6 +6,7 @@ from ..i18n import T
 PAYPAL_LINK   = "https://paypal.me/darsonodark"
 PAYPAL_EMAIL  = "darsono.dark@gmail.com"
 CONTACT_EMAIL = "hots.support@gmail.com"
+KOFI_LINK     = "https://ko-fi.com/darsono"
 
 
 def _safe_t(key: str, fallback: str) -> str:

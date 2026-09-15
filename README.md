@@ -8,7 +8,7 @@
 
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%2864--bit%29-0078D4?logo=windows)](https://github.com/)
-[![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES-brightgreen)](#-language-support)
+[![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES%20%7C%20PT%20%7C%20RU-brightgreen)](#language-support)
 
 ### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
 
@@ -118,7 +118,7 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 <summary><strong>🎨 Other features</strong> — click to expand</summary>
 
 - Light and dark themes, 4 accent colors
-- 5 languages: English, Polski, Français, Deutsch, Español
+- 7 languages: English, Polski, Français, Deutsch, Español, Português, Русский
 - Optional password protection (required to open the app or uninstall it)
 - Built-in update checker
 - Auto-elevation, single-instance guard, window geometry memory
@@ -216,6 +216,8 @@ The interface language can be changed in **Options → Language**. All UI string
 | `fr` | Français |
 | `de` | Deutsch |
 | `es` | Español |
+| `pt` | Português |
+| `ru` | Русский |
 
 ---
 
@@ -235,7 +237,10 @@ Found a security issue? Please report it privately rather than opening a public 
 
 If HOTS Hosts saves you time or you simply want to say thanks:
 
+<a href="https://ko-fi.com/darsono"><img src="hosts_editor/assets/kofi_badge_dark.png" alt="Support me on Ko-fi" width="200"/></a>
+
 **Website:** [hotstools.com](https://hotstools.com)
+**Ko-fi:** [ko-fi.com/darsono](https://ko-fi.com/darsono)
 **PayPal:** [paypal.me/darsonodark](https://paypal.me/darsonodark)
 **Support:** hots.support@gmail.com
 

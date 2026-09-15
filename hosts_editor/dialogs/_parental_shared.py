@@ -1,4 +1,5 @@
 import os
+import weakref
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
@@ -562,7 +563,19 @@ class _InfoButton(QWidget):
         popup = QWidget(None, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         popup.setAttribute(Qt.WA_TranslucentBackground)
         popup.setAttribute(Qt.WA_DeleteOnClose)
-        popup.destroyed.connect(self._on_popup_destroyed)
+
+        self_ref = weakref.ref(self)
+
+        def _on_popup_destroyed(*_args, _ref=self_ref):
+            obj = _ref()
+            if obj is not None:
+                obj._handle_popup_destroyed()
+            else:
+                global _open_info_popups
+                _open_info_popups = max(0, _open_info_popups - 1)
+                info_popup_bus.popup_closed.emit()
+
+        popup.destroyed.connect(_on_popup_destroyed)
 
         outer = QFrame(popup)
         outer.setObjectName("infoPopup")
@@ -596,6 +609,10 @@ class _InfoButton(QWidget):
         )
         v.addWidget(msg)
 
+        for w in (top_line, spacer, msg, outer):
+            w.ensurePolished()
+        if msg.wordWrap():
+            msg.setMinimumHeight(msg.heightForWidth(msg.width()) + 2)
         outer.adjustSize()
         popup.resize(outer.size())
 
@@ -618,7 +635,7 @@ class _InfoButton(QWidget):
         global _open_info_popups
         _open_info_popups += 1
 
-    def _on_popup_destroyed(self):
+    def _handle_popup_destroyed(self):
         self._popup = None
 
         global _open_info_popups

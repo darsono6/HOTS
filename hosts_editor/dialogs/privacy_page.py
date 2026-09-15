@@ -25,24 +25,6 @@ from ._parental_shared import (
 _RSTRUI_EXE = "rstrui.exe"
 
 def _refresh_power_toggle_icon(btn: TransparentToolButton):
-    """Koloruje ikonę-włącznik (FIF.POWER_BUTTON) zależnie od stanu — ten sam
-    wygląd/logika co przy zablokowanych programach/VPN w zakładce Ochrona.
-
-    Stan ON/OFF różni się nie tylko kolorem ikony: wyłączone dostaje dodatkowo
-    cienką, kwadratową obwódkę (tę samą, która i tak pojawia się przy hover),
-    włączone zostaje "czyste" - sam kolorowy symbol bez obwódki. Dzięki temu
-    różnica jest czytelna nawet gdy kolor danego poziomu (np. fiolet
-    "Prywatność+") ma zbliżoną jasność do koloru stanu wyłączonego - zwłaszcza
-    na jasnym motywie, gdzie samo poleganie na odcieniu bywa zbyt subtelne.
-
-    Ustawiamy tu własny setStyleSheet(), co nadpisuje CAŁY domyślny styl
-    TransparentToolButton (łącznie z jego :hover) — dlatego dopisujemy
-    własne reguły :hover/:pressed, żeby nie zgubić tego efektu. Neutralny
-    szary naświetlacz (zamiast czarnego/białego jak w oryginale) wygląda
-    dobrze niezależnie od motywu, bez potrzeby śledzenia który jest aktywny.
-
-    Aktualizuje też tooltip (Blokada aktywna/nieaktywna) — ale nie nadpisuje
-    go dla pozycji z dryfem, bo te mają własny, bardziej szczegółowy opis."""
     hover_rules = (
         "QToolButton:hover { background: rgba(128, 128, 128, 30); }"
         "QToolButton:pressed { background: rgba(128, 128, 128, 45); }"
@@ -94,11 +76,6 @@ def _items_for_level(level: str) -> list:
 
 _LABEL_KEY_BY_ID = {it["id"]: it["label_key"] for it in ITEMS}
 
-# Pozycje, których wyłączenie ma zauważalny wpływ na funkcjonalność systemu
-# (np. przestaje działać pogoda/mapy albo zabezpieczenie antykradzieżowe).
-# Na życzenie usera trójkąt ostrzegawczy przy ich nazwie został wyłączony -
-# zbiór celowo pusty (a nie usunięty), żeby zachować miejsce na ponowne
-# włączenie w przyszłości bez przywracania całego mechanizmu od zera.
 _WARNING_ITEM_IDS = set()
 
 def _with_warning_suffix(item_id: str, text: str) -> str:
@@ -146,13 +123,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         self._manual_ops_active = 0
         self._pending_refresh = False
         self._parent_win = parent
-        # Patrz _InfoPopupBus w _parental_shared.py: gdy watchdog konczy
-        # prace w tle w momencie, gdy user ma otwarty dymek "?" (np. przy
-        # "Zablokuj narzedzie Przywracanie systemu"), refresh_content() nie
-        # moze wtedy w calosci przebudowac strony (patrz nizej) - trzeba
-        # poczekac, az user zamknie dymek, i dopiero wtedy sprobowac znowu.
         info_popup_bus.popup_closed.connect(self._retry_pending_refresh)
-        self._build()
 
     def _retry_pending_refresh(self):
         if self._pending_refresh:
@@ -186,11 +157,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
             self._retry_pending_refresh()
 
     def _set_categories_busy(self, busy: bool):
-        """Nadpisuje wersję z _ParentalCardMixin (_parental_shared.py). Tutaj
-        (karty 'Blokada domen telemetrycznych' i 'Blokada własnych domen')
-        podpinamy się pod już gotowy wskaźnik zajętości strony (spinner +
-        tekst w rogu nagłówka + licznik _manual_ops_active), zamiast
-        dokładać drugi, osobny spinner."""
         if busy:
             self._mark_op_start()
         else:
@@ -205,24 +171,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         self._bg_signal_objs.clear()
 
     def _track_bg_signal(self, signals):
-        """Rejestruje obiekt sygnałów tła (worker -> UI) tak, żeby usuwał się
-        z self._bg_signal_objs sam, zaraz po tym jak 'done' zostanie
-        wyemitowane. Bez tego lista rosła bez ograniczeń przy każdej operacji
-        (przełączenie modułu, zastosowanie checklisty, punkt przywracania,
-        zdjęcie limitu) i była czyszczona dopiero przy zamknięciu aplikacji —
-        realny, powolny wyciek pamięci przy dłuższej sesji.
-
-        WAŻNE: obiekty przekazywane tutaj MUSZĄ być tworzone z Qt-rodzicem
-        (np. _RestorePointSignals(self)), a nie jako "gołe" QObject. _cleanup
-        poniżej usuwa jedyną PYTHONOWĄ referencję do obiektu w trakcie
-        wykonywania jednego z jego własnych slotów (podłączonego do 'done').
-        Bez Qt-rodzica refcount spada do zera i CPython natychmiast niszczy
-        obiekt C++ w trakcie, gdy Qt wciąż iteruje po jego liście połączeń
-        (emit() jest jeszcze na stosie wywołań) — use-after-free, które
-        objawia się jako uszkodzona sterta (0xc0000374) przy zamykaniu/GC.
-        Qt-rodzic sprawia, że obiekt żyje dopóki żyje rodzic, więc usunięcie
-        go z tej listy jest tylko księgowością, a nie utratą ostatniej
-        referencji."""
         self._bg_signal_objs.append(signals)
 
         def _cleanup(*_args, s=signals):
@@ -289,24 +237,9 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         scroll.setWidget(inner)
         rl.addWidget(scroll, 1)
 
-        # Ta sama sztuczka co na stronie ochrony rodzicielskiej
-        # (parental_page.py, _sync_card_heights): baner punktu przywracania
-        # ma naturalnie inną wysokość niż pozostałe moduły (inna liczba
-        # linijek tekstu), więc żeby wszystkie 3 moduły na stronie
-        # Prywatność wyglądały tak samo jak 5 modułów na stronie Ochrona
-        # rodzicielska (ten sam rozmiar), trzeba poczekać, aż Qt policzy
-        # realny layout, i dociągnąć resztę do wysokości banera.
         QTimer.singleShot(0, self._sync_privacy_module_heights)
 
     def _sync_privacy_module_heights(self):
-        # Prostsze i bezpieczniejsze niż wcześniejsza wersja: referencja to
-        # znowu WŁASNY baner tej strony (bez sięgania do ParentalPage przez
-        # self._parent_win). Wysokość i tak wychodzi taka sama jak karty
-        # "hosts_lock_card" na stronie Ochrona rodzicielska, bo
-        # _make_restore_banner() ma teraz te same marginesy (16,14,16,14)
-        # i tę samą liczbę linii tekstu (3) co tamta karta - dopasowanie
-        # wynika z samej struktury layoutu, bez kruchej zależności
-        # między stronami w czasie działania programu.
         if not shiboken6.isValid(self):
             return
         ref_widget = getattr(self, "_restore_banner_widget", None)
@@ -348,14 +281,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         desc.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent; border: none;")
         text_col.addWidget(desc)
 
-        # Trzecia linijka - domyślnie pusta (samo puste miejsce daje
-        # baneru tę samą wysokość co karta hosts_lock_card na stronie
-        # Ochrona rodzicielska, patrz _sync_privacy_module_heights niżej),
-        # a po utworzeniu punktu / usunięciu limitu wyświetla się w niej
-        # komunikat wyniku. Zawsze widoczna (nie chowana) - dzięki temu
-        # zajmuje stałe miejsce i komunikat nie dokłada nowej, czwartej
-        # linijki rozciągającej kartę w dół, tylko podmienia treść tej
-        # zarezerwowanej.
         result_lbl = QLabel("")
         result_lbl.setWordWrap(True)
         result_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8.5pt; background: transparent; border: none;")
@@ -569,9 +494,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         btn.setVisible(False)
 
         signals = _RstruiLockToggleSignals(self)
-        # Ta sama kolejność sprzątania co w _toggle_antispy_module wyżej -
-        # patrz komentarz tam (tu tylko bez osobnego słownika per-klucz,
-        # bo ta karta jest jedna).
         self._rstrui_lock_signals = signals
         self._bg_signal_objs.append(signals)
 
@@ -600,10 +522,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
     def _on_rstrui_lock_toggle_done(self, state: dict, target: bool, ok: bool):
         if not shiboken6.isValid(self):
             return
-        # Patrz identyczny komentarz w _on_antispy_module_done wyżej -
-        # ten handler też pokazuje modal (HOTSDialog.info/error) i może
-        # pośrednio wywołać refresh_content() przez _mark_op_end(), więc
-        # nie powinien nic robić, jeśli okno jest już w trakcie zamykania.
         if is_shutting_down():
             return
         state["busy"] = False
@@ -672,23 +590,9 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         return self._make_card(domains_cat)
 
     def _make_custom_domains_module(self) -> QWidget:
-        """4. moduł na stronie Prywatność - dawniej '16. kategoria' w
-        akordeonie 'popularne serwisy' na stronie Ochrona rodzicielska,
-        przeniesiona tutaj (CUSTOM_CATEGORY w _parental_shared.py), bo to
-        blokada zdefiniowana przez samego użytkownika, koncepcyjnie bliższa
-        Prywatności niż gotowym kategoriom treści. Cała logika (edycja,
-        licznik domen, toggle) zostaje bez zmian w _ParentalCardMixin -
-        tutaj tylko renderujemy tę samą kartę co osobny, pełnowymiarowy
-        moduł zamiast pozycji w akordeonie."""
         return self._make_card(CUSTOM_CATEGORY)
 
     def _make_antispy_levels_group(self, level_configs: list) -> QWidget:
-        """Cztery poziomy ochrony (podstawowa/średnia/zaawansowana/prywatność+)
-        zamknięte w jeden zwijany moduł z przyciskiem Rozwiń/Zwiń -
-        dokładnie ten sam wzorzec co karta 'Blokada aplikacji'
-        (dialogs/_appblock_card.py, _make_appblock_card) i akordeon
-        'popularne serwisy' (dialogs/_parental_shared.py,
-        _make_categories_section)."""
         outer = QWidget()
         outer.setStyleSheet(
             f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
@@ -768,7 +672,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         def _toggle_section():
             expanded = not section_state["expanded"]
             section_state["expanded"] = expanded
-            self._antispy_levels_expanded = expanded  # przeżywa refresh_content()/rebuild karty
+            self._antispy_levels_expanded = expanded
             _apply_section_state(expanded)
 
         toggle_btn.clicked.connect(_toggle_section)
@@ -992,8 +896,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         selected_ids = [iid for iid, cb in state["checkboxes"].items() if cb.isChecked()]
 
         signals = _ChecklistSignals(self)
-        # Ta sama kolejność sprzątania co w _toggle_antispy_module wyżej -
-        # patrz komentarz tam.
         self._antispy_signals[busy_key] = signals
         self._bg_signal_objs.append(signals)
 
@@ -1009,13 +911,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         import threading
 
         def worker(lvl=level, ids=selected_ids):
-            # last_error/last_warnings w AntiSpyManager to dzielony stan
-            # klasowy — jeśli dwie operacje (np. dwa różne poziomy) trwają
-            # równocześnie, wątek A może nadpisać go zanim wątek B zdąży go
-            # odczytać. Dlatego migawkę bierzemy TU, natychmiast po wywołaniu,
-            # w tym samym wątku, i przekazujemy ją przez sygnał — zamiast
-            # czytać AntiSpyManager.last_error dopiero w UI, gdy inna operacja
-            # mogła już go nadpisać.
             err = ""
             try:
                 ok = AntiSpyManager.apply_selected(lvl, ids)
@@ -1033,10 +928,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
     def _on_checklist_applied(self, state: dict, ok: bool, warnings: list, err: str = ""):
         if not shiboken6.isValid(self):
             return
-        # Patrz identyczny komentarz w _on_antispy_module_done wyżej -
-        # ten handler pokazuje modal i może wywołać refresh_content(),
-        # więc nie powinien nic robić, jeśli okno jest już w trakcie
-        # zamykania.
         if is_shutting_down():
             return
         level = state["level"]
@@ -1111,16 +1002,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         attach_fluent_tip(btn, T("par_btn_working"))
 
         signals = _AntiSpySignals(self)
-        # Kolejność sprzątania: rejestrujemy "signals" w obu miejscach
-        # (_antispy_signals[key] i _bg_signal_objs) PRZED podłączeniem
-        # slotu, a w samym slocie NAJPIERW wypisujemy się z obu tych
-        # rejestrów i dopiero POTEM wołamy właściwą obsługę wyniku
-        # (_on_antispy_module_done) - ten sam wzorzec co _cleanup_and_handle
-        # w _run_toggle (_parental_shared.py), zamiast osobnego drugiego
-        # slotu doczepianego przez _track_bg_signal. Efekt uboczny na plus:
-        # _antispy_signals[key] wcześniej nigdy się nie czyścił (tylko
-        # nadpisywał przy kolejnym przełączeniu tego samego trybu) - drobny,
-        # ograniczony wyciek referencji, teraz też posprzątany.
         self._antispy_signals[key] = signals
         self._bg_signal_objs.append(signals)
 
@@ -1136,11 +1017,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         import threading
 
         def worker(s=state, t=target):
-            # Migawkę last_error/last_warnings bierzemy natychmiast, w tym
-            # samym wątku co operacja — inaczej, jeśli równolegle trwa druga
-            # operacja (np. inny poziom), do czasu przetworzenia sygnału w UI
-            # AntiSpyManager.last_error mógłby już należeć do TEJ drugiej
-            # operacji i użytkownik zobaczyłby błędny komunikat.
             err = ""
             try:
                 fn = s["enable_fn"] if t else s["disable_fn"]
@@ -1159,16 +1035,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
     def _on_antispy_module_done(self, state: dict, target: bool, ok: bool, err: str = ""):
         if not shiboken6.isValid(self):
             return
-        # Ten handler dociera tu też wtedy, gdy operacja w tle skończyła się
-        # dosłownie w trakcie zamykania okna (patrz processEvents() w
-        # _on_close_event() w app.py - celowo "domyka" kolejkę sygnałów
-        # Qt.QueuedConnection z wątków roboczych, ZANIM Qt zacznie niszczyć
-        # widgety). Bez tej strażniczki modal HOTSDialog.info/error() poniżej
-        # (zagnieżdżona pętla zdarzeń) albo self._mark_op_end() ->
-        # refresh_content() (pełne przebudowanie strony) mogłyby odpalić się
-        # w środku sekwencji zamykania - to dokładnie ten sam rodzaj wyścigu
-        # co 0xc0000374, tylko na etapie UI zamiast wątku/GC. Okno i tak się
-        # zaraz zamknie, więc pokazywanie wyniku nie ma odbiorcy.
         if is_shutting_down():
             return
         key = state["key"]

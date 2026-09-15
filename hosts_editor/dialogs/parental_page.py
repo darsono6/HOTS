@@ -32,9 +32,6 @@ class _CfDnsToggleSignals(QObject):
 class _HostsLockToggleSignals(QObject):
     done = Signal(bool)
 
-class _HostsLockDriftSignals(QObject):
-    done = Signal(object)
-
 class _CfDnsStatusSignals(QObject):
     done = Signal(bool)
 
@@ -60,8 +57,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         self._states = {}
         self._toggle_signal_refs = []
         self._parent_win = parent
-        self._build()
-        QTimer.singleShot(800, self._check_hosts_lock_drift)
 
     def refresh_content(self):
         self._states = {}
@@ -127,12 +122,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         scroll.setWidget(inner)
         rl.addWidget(scroll, 1)
 
-        # Wysokość karty "blokada pliku hosts" nie jest wymuszona (ma o jedną
-        # linijkę tekstu więcej niż pozostałe pola, więc dopasowuje się do
-        # treści). Żeby dociągnąć do niej pozostałe 3 pola, trzeba poczekać,
-        # aż Qt faktycznie policzy layout i przyzna kartom realną szerokość —
-        # mierzenie od razu po addWidget() dawałoby zawyżony wynik (etykieta
-        # z zawijaniem tekstu liczyłaby się tak, jakby miała szerokość 0).
         QTimer.singleShot(0, self._sync_card_heights)
 
     def _sync_card_heights(self):
@@ -274,22 +263,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
             f"color: {DARK['green'] if active else DARK['fg2']}; font-size: 8.5pt; background: transparent; border: none;"
         )
 
-    def _check_hosts_lock_drift(self):
-        signals = _HostsLockDriftSignals(self)
-        signals.done.connect(self._on_hosts_lock_drift_checked)
-        self._hosts_lock_drift_signals = signals
-
-        def worker():
-            try:
-                result = HostsLockManager.check_drift()
-            except Exception as e:
-                print(f"Hosts lock watchdog warning: {e}")
-                result = None
-            signals.done.emit(result)
-
-        start_bg_thread(worker)
-
-    def _on_hosts_lock_drift_checked(self, result):
+    def apply_hosts_lock_drift_result(self, result):
         if not shiboken6.isValid(self) or is_shutting_down():
             return
         state = getattr(self, "_hosts_lock_state", None)
@@ -297,8 +271,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
             return
         state["active"] = HostsLockManager.is_active()
         self._refresh_hosts_lock_card(state)
-        if self._parent_win and hasattr(self._parent_win, "_refresh_toolbar_status_ui"):
-            self._parent_win._refresh_toolbar_status_ui()
 
         if result == "regressed":
             status_lbl = state["status_lbl"]
@@ -310,16 +282,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
             status_lbl.setStyleSheet(f"color: {DARK['green']}; font-size: 8.5pt; background: transparent; border: none;")
 
     def _make_cf_card(self, height: int = 64) -> QWidget:
-        # is_cf_family_active() odpytuje system o karty sieciowe i dla
-        # kazdej z nich odpala proces "netsh" (patrz dns_utils.py) - na
-        # Windows to zwykle dziesiatki-setki ms NA INTERFEJS. Wywolane tu
-        # synchronicznie, na watku UI, spowalnialoby WIDOCZNIE kazde
-        # przelaczenie na te strone (_build() leci przy kazdym showEvent -
-        # patrz HOTSPage.showEvent w widgets_qt.py). Zamiast tego karta od
-        # razu rysuje sie z ostatnio znanym stanem (self._cf_active,
-        # domyslnie False przy pierwszym uruchomieniu), a realny stan jest
-        # sprawdzany w tle i podmieniany po cichu, gdy wynik nadejdzie -
-        # ten sam wzorzec co _check_hosts_lock_drift() nizej.
         active = getattr(self, "_cf_active", False)
         card = self._card_frame(_CF_ACCENT, height)
         info_lay = card.property("info_lay")
@@ -369,9 +331,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         return card
 
     def _refresh_cf_status_async(self):
-        """Sprawdza realny stan Cloudflare Family DNS w tle (netsh, patrz
-        wyzej przy _make_cf_card) i po cichu odswieza przycisk/etykiete,
-        jesli stan sie zmienil - bez blokowania watku UI."""
         if getattr(self, "_toggle_op_active", False):
             return
 
@@ -407,11 +366,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         attach_fluent_tip(btn, T("par_cf_btn_disable") if active else T("par_cf_btn_enable"))
 
     def _toggle_cf_dns(self):
-        # Ta sama blokada co przy kategoriach ("_toggle_op_active" z
-        # _ParentalCardMixin) — jeśli trwa już jakikolwiek zapis do hosts
-        # (kategoria ALBO CF DNS), nie pozwalamy odpalić drugiego, żeby
-        # znowu nie dostać nakładających się zapisów zapychających DNS
-        # Client.
         if getattr(self, "_toggle_op_active", False):
             return
 
@@ -441,11 +395,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
             res = {"ok": False, "active": self._cf_active, "failed": [],
                    "adult_ok": None, "adult_err": None}
 
-            # Wyłączenie kategorii "Dorośli" musi się zdarzyć w TYM SAMYM
-            # wątku w tle co reszta — to wywołanie toggle_parental_control()
-            # potrafi teraz (przy zajętym pliku hosts) trwać kilkanaście-
-            # -kilkadziesiąt sekund retry'ów, więc zrobione na głównym
-            # wątku UI zamroziłoby całe okno appki na ten czas.
             if adult_state is not None:
                 try:
                     ok = toggle_parental_control(
@@ -476,10 +425,14 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
                     res["ok"], res["failed"] = disable_cf_family_dns()
             except Exception:
                 res["ok"], res["failed"] = False, []
-            try:
-                res["active"] = is_cf_family_active()
-            except Exception:
-                pass
+
+            if res["ok"]:
+                res["active"] = enable
+            else:
+                try:
+                    res["active"] = is_cf_family_active()
+                except Exception:
+                    pass
             signals.done.emit(res)
 
         start_bg_thread(worker)
