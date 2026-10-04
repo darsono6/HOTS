@@ -1,7 +1,7 @@
-HOTS Hosts v2.2
+HOTS Hosts v2.3
 ===============
 
-A Fluent-Design desktop application for managing the Windows hosts file.
+A desktop application for managing the Windows hosts file.
 Part of the HOTS Tools family. Free and open-source, released under GPLv3.
 
 
@@ -49,13 +49,23 @@ MAIN FEATURES
 - Privacy tools: 37 individual Windows telemetry/privacy tweaks across
   four levels (Basic / Medium / Advanced / Privacy+), with drift
   detection and System Restore integration
-- Light and dark themes with 4 accent colors
-- Built-in update checker (via GitHub Releases)
+- Light and dark themes with 5 accent colors
+- Built-in update checker (via GitHub Releases); checks on startup by
+  default, can be switched off in Options > About
 - Optional password protection (SHA-256 hash stored machine-wide in the
   Registry) - required both to open the app and to uninstall it
 - Raw hosts file editor with syntax highlighting
 - Available in 7 languages: English, Polish, French, German, Spanish,
   Russian, Portuguese
+
+
+WHAT'S NEW IN 2.3
+-----------------
+- Significantly lower resource usage: the app no longer depends on
+  PySide6-Fluent-Widgets and runs on its own lightweight window and widgets
+- Code optimization throughout the application
+- A fifth accent color
+- Refreshed look and a number of small UI fixes
 
 
 PARENTAL CONTROL - KNOWN LIMITATIONS

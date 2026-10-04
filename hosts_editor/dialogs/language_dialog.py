@@ -1,10 +1,7 @@
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QWidget, QButtonGroup, QRadioButton
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHBoxLayout, QGridLayout, QButtonGroup
 
-from qfluentwidgets import FluentIcon as FIF
-
-from ..constants import DARK
-from ..widgets_qt import HOTSDialog, HOTSButton, h_separator
+from ..icons import FIF
+from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, HOTSRadio
 from ..i18n import T, current_lang, LANGUAGES
 
 
@@ -30,13 +27,7 @@ class LanguageDialog(HOTSDialog):
         grid.setVerticalSpacing(8)
         cols = 2
         for i, (code, name) in enumerate(LANGUAGES.items()):
-            rb = QRadioButton(f"{flags.get(code, '')}  {name}")
-            rb.setStyleSheet(
-                f"QRadioButton {{ color: {DARK['fg']}; background: transparent; spacing: 12px; font-size: 10pt; padding: 4px 0px; }}\n"
-                f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
-                f"QRadioButton::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-                f"QRadioButton::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
-            )
+            rb = HOTSRadio(f"{flags.get(code, '')}  {name}", pad_v=4)
             if code == current_lang():
                 rb.setChecked(True)
             self._group.addButton(rb)

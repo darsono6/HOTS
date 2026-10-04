@@ -11,13 +11,15 @@ def _setup_error_log():
         log_dir = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "error.log"
-        if getattr(sys.stderr, "name", None) == str(log_path):
-            return
-        sys.stderr = open(log_path, "w", encoding="utf-8", buffering=1)
-        sys.stdout = sys.stderr
+        # The launcher (.pyw) may have already opened this log, so don't reopen it.
+        # faulthandler must be enabled in either case.
+        if getattr(sys.stderr, "name", None) != str(log_path):
+            sys.stderr = open(log_path, "w", encoding="utf-8", buffering=1)
+            sys.stdout = sys.stderr
         faulthandler.enable(file=sys.stderr, all_threads=True)
     except Exception:
         pass
+
 
 _setup_error_log()
 
@@ -29,15 +31,6 @@ def _log_unhandled_exception(exc_type, exc_value, exc_tb):
         pass
 
 sys.excepthook = _log_unhandled_exception
-
-
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
-except Exception:
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()
-    except Exception:
-        pass
 
 
 def _set_app_user_model_id():
@@ -104,7 +97,7 @@ def _make_splash():
     from PySide6.QtGui import QPixmap
     from PySide6.QtCore import Qt
 
-    path = _resource_path("logo1.png")
+    path = _resource_path("graphic/logo1.png")
     if not os.path.exists(path):
         return None
     pix = QPixmap(path)
@@ -180,7 +173,7 @@ def _run():
     app._no_sb_ctx_filter = NoScrollbarContextMenuFilter(app)
     app.installEventFilter(app._no_sb_ctx_filter)
 
-    _icon_path = _resource_path("logo.ico")
+    _icon_path = _resource_path("graphic/logo.ico")
     _icon = QIcon(_icon_path) if os.path.exists(_icon_path) else QIcon()
     if not _icon.isNull():
         app.setWindowIcon(_icon)

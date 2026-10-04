@@ -109,14 +109,16 @@ ACCENT_PRESETS_DARK = {
     "red":   {"accent": "#c84040", "accent_fg": "#ffffff", "sel_bg": "#3d1616", "sel_fg": "#f0b0b0"},
     "green": {"accent": "#4ec94e", "accent_fg": "#ffffff", "sel_bg": "#163d16", "sel_fg": "#b0f0b0"},
     "blue":  {"accent": "#4098d4", "accent_fg": "#ffffff", "sel_bg": "#16283d", "sel_fg": "#b0d0f0"},
+    "teal":  {"accent": "#2aa5a0", "accent_fg": "#ffffff", "sel_bg": "#123a38", "sel_fg": "#b0f0ea"},
 }
 ACCENT_PRESETS_LIGHT = {
     "gold":  {"accent": "#a87b0e", "accent_fg": "#ffffff", "sel_bg": "#fbf0d4", "sel_fg": "#5c4409"},
     "red":   {"accent": "#b23434", "accent_fg": "#ffffff", "sel_bg": "#fbe1e1", "sel_fg": "#6b1f1f"},
     "green": {"accent": "#2e8f2e", "accent_fg": "#ffffff", "sel_bg": "#e1f5e1", "sel_fg": "#1c561c"},
     "blue":  {"accent": "#2f77ab", "accent_fg": "#ffffff", "sel_bg": "#e1eef7", "sel_fg": "#1c4a68"},
+    "teal":  {"accent": "#1f827d", "accent_fg": "#ffffff", "sel_bg": "#dff3f1", "sel_fg": "#14504d"},
 }
-DEFAULT_ACCENT = "gold"
+DEFAULT_ACCENT = "teal"
 DEFAULT_THEME = "dark"
 
 DARK = dict(BASE_DARK)
@@ -145,8 +147,6 @@ def _apply_saved_theme():
 
 
 _apply_saved_theme()
-
-QSS_VARS = {k: v for k, v in DARK.items()}
 
 
 def hex_to_rgb(hex_color: str) -> tuple:

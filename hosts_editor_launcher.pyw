@@ -33,6 +33,68 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--verify-uninstall-password":
     sys.exit(_verify_uninstall_password())
 
 
+if len(sys.argv) >= 3 and sys.argv[1] == "--uninstall-cleanup":
+    def _run_uninstall_cleanup() -> int:
+        import json
+
+        result_path = sys.argv[2]
+        report = {"errors": [], "delete_data": False}
+
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+            from PySide6.QtWidgets import QApplication, QDialog
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QIcon
+
+            QApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+
+            from hosts_editor.constants import load_settings
+            from hosts_editor.i18n import set_lang
+            from hosts_editor.widgets_qt import apply_global_style
+            from hosts_editor.resource_utils import resource_path
+            from hosts_editor import uninstall_flow
+
+            settings = load_settings()
+            set_lang(settings.get("language", "en"))
+
+            app = QApplication.instance() or QApplication(sys.argv)
+            apply_global_style(app)
+            try:
+                icon_path = resource_path("graphic/logo.ico")
+                if os.path.exists(icon_path):
+                    app.setWindowIcon(QIcon(icon_path))
+            except Exception:
+                pass
+
+            counts = {
+                "antispy": uninstall_flow.count_active_antispy_items(),
+                "backups": uninstall_flow.count_hosts_backups(),
+                "custom_domains": uninstall_flow.custom_domains_file_exists(),
+            }
+
+            from hosts_editor.dialogs.uninstall_wizard import UninstallWizardDialog
+            dlg = UninstallWizardDialog(counts=counts)
+            accepted = (dlg.exec() == QDialog.Accepted)
+            choices = dlg.choices if (accepted and dlg.choices) else {}
+
+            report = uninstall_flow.apply_uninstall_choices(choices)
+        except Exception as e:
+            report.setdefault("errors", []).append(f"fatal: {e}")
+
+        try:
+            with open(result_path, "w", encoding="utf-8") as f:
+                json.dump(report, f)
+        except Exception:
+            pass
+
+        return 0
+
+    sys.exit(_run_uninstall_cleanup())
+
+
 log_path = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts" / "error.log"
 log_path.parent.mkdir(parents=True, exist_ok=True)
 _log = open(log_path, "w", encoding="utf-8", buffering=1)
@@ -237,13 +299,10 @@ try:
         print(f"exists: True", flush=True)
         print(f"files: {os.listdir(he_path)}", flush=True)
     else:
-        print("exists: False (package is likely bundled inside the PyInstaller archive — this is normal in --onefile mode)", flush=True)
+        print("exists: False (package is likely bundled inside the Nuitka standalone archive — this is normal for --standalone builds)", flush=True)
 
     import PySide6
     print(f"PySide6: {PySide6.__version__}", flush=True)
-
-    import qfluentwidgets
-    print(f"qfluentwidgets OK", flush=True)
 
     from hosts_editor.__main__ import main
     print("main imported OK", flush=True)

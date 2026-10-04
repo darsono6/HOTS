@@ -16,7 +16,7 @@ def get_base_dir() -> str:
 
 
 def resource_path(name: str) -> str:
-    return os.path.join(get_base_dir(), "graphic", name)
+    return os.path.join(get_base_dir(), name)
 
 
 def blocklists_dir() -> str:

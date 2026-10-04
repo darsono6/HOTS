@@ -1,85 +1,28 @@
 import sys
 import time
 import ctypes
-import math
 import weakref
 from typing import Optional, Union
 
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QSizePolicy, QApplication,
-    QMessageBox, QLineEdit, QScrollBar,
+    QPushButton, QFrame, QApplication, QLineEdit,
+    QScrollBar, QCheckBox, QRadioButton, QStyle, QStyleOptionButton, QAbstractScrollArea, QAbstractItemView,
 )
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, QObject, QEvent, QTimer, QSize as _QSize
-from PySide6.QtGui import QColor, QFont, QPalette, QIcon, QCursor
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, QObject, QEvent, QTimer, QRectF, QVariantAnimation, QSize as _QSize
+from PySide6.QtGui import QColor, QPalette, QIcon, QCursor, QPainter, QPen
 
-from qfluentwidgets import IconWidget, FluentIconBase, FluentIcon as FIF
-try:
-    from qfluentwidgets import IndeterminateProgressRing
-except ImportError:
-    IndeterminateProgressRing = None
 import shiboken6
 from .constants import DARK, IS_LIGHT_THEME, accent_rgba
 from .bg_tasks import is_shutting_down, register_wakeup
+from .icons import FIF, AppIcon, make_qicon
+from .ui_parts import IconWidget, IndeterminateProgressRing, TransparentToolButton
 
-_COLORED_ICON_DEFAULT_SIZES = (13, 14, 15, 16, 18, 20, 22, 24, 32, 48, 64, 96)
-
-_colored_icon_cache: dict = {}
-_COLORED_ICON_CACHE_MAX = 1000
 
 def colored_svg_icon(fif_icon, color, theme=None, sizes=None) -> QIcon:
-    from qfluentwidgets.common.icon import writeSvg
-    from qfluentwidgets.common.config import Theme
-    from PySide6.QtSvg import QSvgRenderer
-    from PySide6.QtCore import QRectF, QByteArray
-    from PySide6.QtGui import QPainter, QImage, QPixmap
+    """Coloured QIcon from an FIF icon. `theme` is unused, kept for old call sites."""
+    return make_qicon(fif_icon, color, sizes)
 
-    if theme is None:
-        theme = Theme.AUTO
-
-    path = fif_icon.path(theme)
-    if not (path.lower().endswith(".svg") and color is not None):
-
-        return QIcon(path)
-
-    qcolor = QColor(color)
-    resolved_sizes = sizes if sizes is not None else _COLORED_ICON_DEFAULT_SIZES
-    cache_key = (path, qcolor.name(QColor.HexArgb), tuple(resolved_sizes))
-
-    cached = _colored_icon_cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    svg = writeSvg(path, fill=qcolor.name())
-    svg_bytes = QByteArray(svg.encode("utf-8"))
-
-    icon = QIcon()
-
-    device_pixel_ratios = (1.0, 1.25, 1.5, 1.75, 2.0)
-
-    for size in resolved_sizes:
-        for dpr in device_pixel_ratios:
-
-            px = max(1, math.ceil(size * dpr))
-            image = QImage(px, px, QImage.Format_ARGB32)
-            image.fill(Qt.transparent)
-            pixmap = QPixmap.fromImage(image, Qt.NoFormatConversion)
-            pixmap.setDevicePixelRatio(dpr)
-            painter = QPainter(pixmap)
-            try:
-
-                painter.setRenderHint(QPainter.Antialiasing, True)
-                painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-                renderer = QSvgRenderer(svg_bytes)
-
-                renderer.render(painter, QRectF(0, 0, size, size))
-            finally:
-                painter.end()
-            icon.addPixmap(pixmap)
-
-    if len(_colored_icon_cache) < _COLORED_ICON_CACHE_MAX:
-        _colored_icon_cache[cache_key] = icon
-    return icon
 
 _open_tip_popups: list = []
 
@@ -206,11 +149,16 @@ class _FluentTipFilter(QObject):
 
     _SHOW_DELAY_MS = 900
 
-    def __init__(self, target: QWidget, text: str, width: Optional[int] = None):
+    def __init__(self, target: QWidget, text: str, width: Optional[int] = None,
+                 side: str = "bottom", delay_ms: Optional[int] = None):
         super().__init__(target)
         self._target = target
         self._text = text
         self._width = width
+        # side: "bottom" (default, tip below the element) or "right" (to the right, vertically
+        # centred - for the vertical nav rail)
+        self._side = side
+        self._delay_ms = delay_ms if delay_ms is not None else self._SHOW_DELAY_MS
         self._popup: Optional[QWidget] = None
         self._show_timer = QTimer(self)
         self._show_timer.setSingleShot(True)
@@ -241,7 +189,7 @@ class _FluentTipFilter(QObject):
             et = event.type()
             if et == QEvent.Enter:
                 if self._text:
-                    self._show_timer.start(self._SHOW_DELAY_MS)
+                    self._show_timer.start(self._delay_ms)
             elif et in (QEvent.Leave, QEvent.Hide, QEvent.MouseButtonPress):
                 self._show_timer.stop()
                 self._hide()
@@ -310,14 +258,22 @@ class _FluentTipFilter(QObject):
         outer.adjustSize()
         popup.resize(outer.size())
 
-        gpos_bl = self._target.mapToGlobal(self._target.rect().bottomLeft())
         screen = QApplication.primaryScreen().availableGeometry()
-        x = gpos_bl.x()
-        y = gpos_bl.y() + 6
-        if x + popup.width() > screen.right():
-            x = screen.right() - popup.width() - 4
-        if y + popup.height() > screen.bottom():
-            y = gpos_bl.y() - popup.height() - 6 - self._target.height()
+        if self._side == "right":
+            gpos_tr = self._target.mapToGlobal(self._target.rect().topRight())
+            x = gpos_tr.x() + 8
+            y = gpos_tr.y() + (self._target.height() - popup.height()) // 2
+            if x + popup.width() > screen.right():
+                x = screen.right() - popup.width() - 4
+            y = max(screen.top() + 4, min(y, screen.bottom() - popup.height() - 4))
+        else:
+            gpos_bl = self._target.mapToGlobal(self._target.rect().bottomLeft())
+            x = gpos_bl.x()
+            y = gpos_bl.y() + 6
+            if x + popup.width() > screen.right():
+                x = screen.right() - popup.width() - 4
+            if y + popup.height() > screen.bottom():
+                y = gpos_bl.y() - popup.height() - 6 - self._target.height()
         popup.move(x, y)
         popup.show()
         self._popup = popup
@@ -332,14 +288,18 @@ class _FluentTipFilter(QObject):
             self._popup = None
         _open_tip_popups[:] = [p for p in _open_tip_popups if p is not popup]
 
-def attach_fluent_tip(widget: QWidget, text: str, width: Optional[int] = None) -> _FluentTipFilter:
+def attach_fluent_tip(widget: QWidget, text: str, width: Optional[int] = None,
+                      side: str = "bottom", delay_ms: Optional[int] = None) -> _FluentTipFilter:
     existing = getattr(widget, "_fluent_tip_filter", None)
     if isinstance(existing, _FluentTipFilter):
         existing.set_text(text)
         if width is not None:
             existing._width = width
+        existing._side = side
+        if delay_ms is not None:
+            existing._delay_ms = delay_ms
         return existing
-    filt = _FluentTipFilter(widget, text, width)
+    filt = _FluentTipFilter(widget, text, width, side, delay_ms)
     widget._fluent_tip_filter = filt
     return filt
 
@@ -506,8 +466,9 @@ def apply_global_style(app: QApplication):
 
 class HOTSButton(QPushButton):
 
-    def __init__(self, icon: Union[str, FluentIconBase, QIcon], icon_color: str, label: str, parent=None,
-                 accent: bool = False, glyph_color: Optional[str] = None):
+    def __init__(self, icon: Union[str, AppIcon, QIcon], icon_color: str, label: str, parent=None,
+                 accent: bool = False, glyph_color: Optional[str] = None, icon_size: int = 18,
+                 radius: int = 6, h_margins: tuple = (12, 14)):
         super().__init__(parent)
         self._icon       = icon
         self._icon_color = icon_color
@@ -516,6 +477,9 @@ class HOTSButton(QPushButton):
         self._label      = label
         self._accent     = accent
         self._glow_alpha = 0
+        self._icon_size  = icon_size
+        self._radius     = radius
+        self._h_margins  = h_margins
 
         self._build_ui()
         self.setCursor(Qt.PointingHandCursor)
@@ -540,7 +504,7 @@ class HOTSButton(QPushButton):
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 14, 0)
+        layout.setContentsMargins(self._h_margins[0], 0, self._h_margins[1], 0)
         layout.setSpacing(8)
 
         if isinstance(self._icon, str):
@@ -552,7 +516,7 @@ class HOTSButton(QPushButton):
             self._ico_lbl.setAlignment(Qt.AlignCenter)
         else:
             self._ico_lbl = IconWidget(self._icon, self)
-            self._ico_lbl.setFixedSize(18, 18)
+            self._ico_lbl.setFixedSize(self._icon_size, self._icon_size)
 
         self._ico_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout.addWidget(self._ico_lbl)
@@ -585,7 +549,7 @@ class HOTSButton(QPushButton):
             QPushButton {{
                 background-color: {base_bg};
                 border: 1px solid {base_border};
-                border-radius: 6px;
+                border-radius: {self._radius}px;
                 outline: none;
             }}
             QPushButton:pressed {{
@@ -606,7 +570,7 @@ class HOTSButton(QPushButton):
                 QPushButton {{
                     background-color: {accent_rgba(round(opacity, 2))};
                     border: 1px solid {accent_rgba(round(border_op, 2))};
-                    border-radius: 6px;
+                    border-radius: {self._radius}px;
                     outline: none;
                 }}
                 QPushButton:pressed {{
@@ -621,7 +585,7 @@ class HOTSButton(QPushButton):
                 QPushButton {{
                     background-color: rgba({r},{g},{b},{bg_op});
                     border: 1px solid rgba({r},{g},{b},{border_op});
-                    border-radius: 6px;
+                    border-radius: {self._radius}px;
                     outline: none;
                 }}
                 QPushButton:pressed {{
@@ -650,9 +614,9 @@ class HOTSButton(QPushButton):
                 f"color: {color.name()}; font-size: 19px; background: transparent; border: none; outline: none;"
             )
         elif isinstance(self._ico_lbl, IconWidget):
-            if isinstance(self._icon, FluentIconBase):
+            if isinstance(self._icon, AppIcon):
 
-                self._ico_lbl.setIcon(colored_svg_icon(self._icon, color, sizes=(18,)))
+                self._ico_lbl.setIcon(colored_svg_icon(self._icon, color, sizes=(self._icon_size,)))
 
     def _parse_rgb(self, hex_color: str):
         try:
@@ -681,7 +645,7 @@ class HOTSButton(QPushButton):
         if self._glow_alpha > 0:
             self._update_style()
 
-    def set_icon(self, icon: Union[str, FluentIconBase, QIcon], color: Optional[str] = None,
+    def set_icon(self, icon: Union[str, AppIcon, QIcon], color: Optional[str] = None,
                  glyph_color: Optional[str] = None):
         self._icon = icon
         if color is not None:
@@ -826,11 +790,29 @@ class HOTSDialog(QDialog):
         d = _MsgDialog(parent, title, message, "restart")
         return d.exec() == QDialog.Accepted
 
+class EqualHeight(QObject):
+
+    def __init__(self, source: QWidget, targets):
+        super().__init__(source)
+        self._targets = targets
+        source.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Resize:
+            h = obj.height()
+            if h > 0:
+                for w in self._targets:
+                    if shiboken6.isValid(w) and (w.minimumHeight() != h or w.maximumHeight() != h):
+                        w.setFixedHeight(h)
+        return False
+
+
 class HOTSPage(QWidget):
 
     _MIN_BUSY_VISIBLE_S = 1.0
+    _refresh_on_show = True
 
-    def __init__(self, object_name: str, icon: FluentIconBase, title: str,
+    def __init__(self, object_name: str, icon: AppIcon, title: str,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setObjectName(object_name)
@@ -840,7 +822,7 @@ class HOTSPage(QWidget):
 
     def _build_frame(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
+        root.setContentsMargins(24, 14, 24, 14)
         root.setSpacing(0)
 
         header = QHBoxLayout()
@@ -924,7 +906,8 @@ class HOTSPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.refresh_content()
+        if self._refresh_on_show:
+            self.refresh_content()
 
     def refresh_content(self):
         pass
@@ -947,18 +930,16 @@ class _MsgDialog(HOTSDialog):
         cl.setContentsMargins(24, 18, 24, 12)
         cl.setSpacing(12)
 
-        row = QHBoxLayout()
-        row.setSpacing(12)
         ico = IconWidget(icon_fif)
         ico.setFixedSize(22, 22)
         ico.setIcon(colored_svg_icon(icon_fif, QColor(icon_color), sizes=(22,)))
-        row.addWidget(ico, 0, Qt.AlignTop)
+        cl.addWidget(ico, 0, Qt.AlignHCenter)
 
         msg = QLabel(message)
         msg.setWordWrap(True)
+        msg.setAlignment(Qt.AlignCenter)
         msg.setStyleSheet(f"color: {DARK['fg']}; background: transparent;")
-        row.addWidget(msg, 1)
-        cl.addLayout(row)
+        cl.addWidget(msg)
         cl.addStretch()
 
         btn_row = QHBoxLayout()
@@ -1273,6 +1254,225 @@ def attach_text_edit_context_menu(text_edit):
     text_edit.setContextMenuPolicy(_Qt.CustomContextMenu)
     text_edit.customContextMenuRequested.connect(_show)
 
+class HOTSRadio(QRadioButton):
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None, font_pt: float = 10,
+                 spacing: int = 12, pad_v: int = 2, accent: Optional[QColor] = None):
+        super().__init__(text, parent)
+        self._accent = accent
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
+        self.setStyleSheet(
+            f"QRadioButton {{ color: {DARK['fg']}; background: transparent; spacing: {spacing}px; "
+            f"font-size: {font_pt}pt; padding: {pad_v}px 0px; outline: none; border: none; }}\n"
+            "QRadioButton::indicator { width: 16px; height: 16px; background: transparent; border: none; }"
+        )
+        self._pos = 1.0 if self.isChecked() else 0.0
+        self._hover = False
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.valueChanged.connect(self._on_anim)
+        self.toggled.connect(self._on_toggled)
+
+    def _on_anim(self, v):
+        self._pos = float(v)
+        self.update()
+
+    def _on_toggled(self, checked: bool):
+        target = 1.0 if checked else 0.0
+        self._anim.stop()
+        if not self.isVisible():
+            self._pos = target
+            self.update()
+            return
+        self._anim.setStartValue(self._pos)
+        self._anim.setEndValue(target)
+        self._anim.start()
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        opt = QStyleOptionButton()
+        opt.initFrom(self)
+        r = self.style().subElementRect(QStyle.SE_RadioButtonIndicator, opt, self)
+        d = min(r.width(), r.height())
+        cx, cy = r.x() + r.width() / 2, r.y() + r.height() / 2
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        if not self.isEnabled():
+            p.setOpacity(0.45)
+
+        acc = self._accent or QColor(DARK["accent"])
+        off = QColor(0, 0, 0, 64) if IS_LIGHT_THEME else QColor(255, 255, 255, 51)
+        t = self._pos
+        if self._hover or t > 0:
+            line = QColor(acc)
+            if t < 1 and not self._hover:
+                line = QColor(*(round(off.getRgb()[i] + (acc.getRgb()[i] - off.getRgb()[i]) * t) for i in range(4)))
+        else:
+            line = off
+
+        p.setPen(QPen(line, 1))
+        p.setBrush(Qt.NoBrush)
+        rad = (d - 1) / 2
+        p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
+
+        if t > 0:
+            dot = 4.0 * t
+            p.setPen(Qt.NoPen)
+            p.setBrush(acc)
+            p.drawEllipse(QRectF(cx - dot, cy - dot, dot * 2, dot * 2))
+
+
+class HOTSSwitch(QCheckBox):
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None,
+                 font_pt: float = 10, color: Optional[str] = None, spacing: int = 12):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
+        self.setStyleSheet(
+            f"QCheckBox {{ color: {color or DARK['fg']}; background: transparent; spacing: {spacing}px; "
+            f"font-size: {font_pt}pt; padding: 2px 0px; outline: none; border: none; }}\n"
+            "QCheckBox::indicator { width: 34px; height: 18px; background: transparent; border: none; }"
+        )
+        self._pos = 1.0 if self.isChecked() else 0.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(140)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.valueChanged.connect(self._on_anim)
+        self.clicked.connect(self._animate)
+        self._hover = False
+
+    def _on_anim(self, v):
+        self._pos = float(v)
+        self.update()
+
+    def _animate(self, checked: bool):
+        self._anim.stop()
+        self._anim.setStartValue(self._pos)
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def setChecked(self, checked: bool):
+        super().setChecked(checked)
+        self._anim.stop()
+        self._pos = 1.0 if checked else 0.0
+        self.update()
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        opt = QStyleOptionButton()
+        opt.initFrom(self)
+        r = self.style().subElementRect(QStyle.SE_CheckBoxIndicator, opt, self)
+        track = QRectF(r.x() + 0.5, r.y() + 0.5, r.width() - 1, r.height() - 1)
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        if not self.isEnabled():
+            p.setOpacity(0.45)
+
+        t = self._pos
+        acc = QColor(DARK["accent"])
+        off_fill = QColor(0, 0, 0, 20) if IS_LIGHT_THEME else QColor(255, 255, 255, 30)
+        off_line = QColor(0, 0, 0, 64) if IS_LIGHT_THEME else QColor(255, 255, 255, 51)
+        off_knob = QColor("#6b6b6b") if IS_LIGHT_THEME else QColor("#bdbdbd")
+
+        def mix(a: QColor, b: QColor) -> QColor:
+            return QColor(*(round(a.getRgb()[i] + (b.getRgb()[i] - a.getRgb()[i]) * t) for i in range(4)))
+
+        line = acc if (self._hover and t < 0.5) else mix(off_line, acc)
+        p.setPen(QPen(line, 1))
+        p.setBrush(mix(off_fill, acc))
+        p.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+
+        d = 12
+        x0 = track.x() + 3.5
+        x1 = track.right() - 3.5 - d
+        p.setPen(Qt.NoPen)
+        p.setBrush(mix(off_knob, QColor("#ffffff")))
+        p.drawEllipse(QRectF(x0 + (x1 - x0) * t, track.y() + (track.height() - d) / 2, d, d))
+
+        if self.hasFocus():
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(acc, 1))
+            p.drawRoundedRect(track.adjusted(-2, -2, 2, 2), track.height() / 2 + 2, track.height() / 2 + 2)
+
+
+class SmoothWheel(QObject):
+    """Smooth mouse-wheel scrolling (~150 ms animation instead of a jump). Touchpads,
+    high-resolution wheels (pixelDelta) and Ctrl/Shift wheel are left unchanged. For tables it
+    works only in ScrollPerPixel mode. step_px: pixels per wheel notch (default: the bar's
+    singleStep)."""
+
+    def __init__(self, area: QAbstractScrollArea, step_px: Optional[int] = None):
+        super().__init__(area)
+        self._area = area
+        self._sb = area.verticalScrollBar()
+        self._step = step_px
+        self._target = None
+        self._anim = QPropertyAnimation(self._sb, b"value", self)
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.finished.connect(self._reset)
+        self._sb.sliderPressed.connect(self._cancel)
+        self._sb.actionTriggered.connect(lambda _a: self._cancel())
+        area.viewport().installEventFilter(self)
+
+    def _reset(self):
+        self._target = None
+
+    def _cancel(self):
+        self._anim.stop()
+        self._target = None
+
+    def eventFilter(self, obj, ev):
+        if ev.type() != QEvent.Wheel:
+            return False
+        if ev.modifiers() != Qt.NoModifier or not ev.pixelDelta().isNull():
+            return False
+        dy = ev.angleDelta().y()
+        sb = self._sb
+        if dy == 0 or sb.maximum() <= sb.minimum():
+            return False
+        if isinstance(self._area, QAbstractItemView) and \
+                self._area.verticalScrollMode() != QAbstractItemView.ScrollPerPixel:
+            return False
+        step = self._step or sb.singleStep()
+        base = sb.value() if self._target is None else self._target
+        target = int(round(base - dy / 120.0 * QApplication.wheelScrollLines() * step))
+        target = max(sb.minimum(), min(sb.maximum(), target))
+        if target == base:
+            # at the edge: let the event propagate (e.g. to the parent) unless an animation is running
+            return self._target is not None
+        self._target = target
+        self._anim.stop()
+        self._anim.setStartValue(sb.value())
+        self._anim.setEndValue(target)
+        self._anim.start()
+        ev.accept()
+        return True
+
+
 def h_separator() -> QFrame:
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
@@ -1289,7 +1489,6 @@ def v_separator() -> QFrame:
 
 def make_folder_button(path: str, on_click, size: int = 28, icon_size: int = 15,
                         parent: Optional[QWidget] = None):
-    from qfluentwidgets import TransparentToolButton
     btn = TransparentToolButton(FIF.FOLDER, parent)
     btn.setFixedSize(size, size)
     btn.setIconSize(_QSize(icon_size, icon_size))

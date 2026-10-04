@@ -9,16 +9,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QApplication,
+    QApplication, QSizePolicy,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, QObject, QEvent
 from PySide6.QtGui import QColor
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget
-
+from ..icons import FIF
+from ..ui_parts import IconWidget
 from ..constants import DARK, accent_rgba
 from ..core import dns_lookup_external, has_internet_connection
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, HOTSContextMenu, attach_fluent_table_tip, attach_fluent_tip, colored_svg_icon
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, HOTSContextMenu, attach_fluent_table_tip, colored_svg_icon, SmoothWheel
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, register_wakeup, is_shutting_down
 
@@ -95,6 +95,51 @@ class DiagnosticsPage(HOTSPage):
         return (f"background: {DARK['panel_bg']}; "
                 f"border: 1px solid {DARK['border_faint']}; border-radius: 6px;")
 
+    def _on_diag_col_resized(self, index, old_size, new_size):
+        min_widths = getattr(self, "_diag_min_widths", None)
+        if not min_widths or index >= len(min_widths):
+            return
+        if new_size < min_widths[index]:
+            self.table.horizontalHeader().blockSignals(True)
+            self.table.setColumnWidth(index, min_widths[index])
+            self.table.horizontalHeader().blockSignals(False)
+            return
+
+        viewport_width = self.table.viewport().width()
+        min_last_width = getattr(self, "_diag_min_last_width", 0)
+        other_widths = sum(
+            self.table.columnWidth(i) for i in range(len(min_widths)) if i != index
+        )
+        max_allowed_width = max(min_widths[index], viewport_width - other_widths - min_last_width)
+
+        if new_size > max_allowed_width:
+            self.table.horizontalHeader().blockSignals(True)
+            self.table.setColumnWidth(index, max_allowed_width)
+            self.table.horizontalHeader().blockSignals(False)
+
+    def _adjust_diag_columns_on_resize(self):
+        if not hasattr(self, "table") or self.table is None:
+            return
+        min_widths = getattr(self, "_diag_min_widths", None)
+        if not min_widths:
+            return
+
+        viewport_width = self.table.viewport().width()
+        min_last_width = getattr(self, "_diag_min_last_width", 0)
+        current_widths = [self.table.columnWidth(i) for i in range(len(min_widths))]
+        total_interactive = sum(current_widths)
+        max_allowed = viewport_width - min_last_width
+
+        if total_interactive > max_allowed and max_allowed > 0:
+            scale = max_allowed / total_interactive
+            new_widths = [max(min_widths[i], int(current_widths[i] * scale)) for i in range(len(min_widths))]
+            new_widths[-1] = max(min_widths[-1], max_allowed - sum(new_widths[:-1]))
+
+            self.table.horizontalHeader().blockSignals(True)
+            for i, w in enumerate(new_widths):
+                self.table.setColumnWidth(i, w)
+            self.table.horizontalHeader().blockSignals(False)
+
     def _build(self):
         cl = self.content_layout
         cl.setContentsMargins(12, 10, 12, 10)
@@ -170,15 +215,51 @@ class DiagnosticsPage(HOTSPage):
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        SmoothWheel(self.table)
         if self.mode == "malware":
             self.table.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table.customContextMenuRequested.connect(self._show_table_context_menu)
         _hdr = self.table.horizontalHeader()
+        fm = _hdr.fontMetrics()
+        PAD = 28
+        if self.mode == "existence":
+            col0_w = max(
+                fm.horizontalAdvance(headers[0]),
+                fm.horizontalAdvance(T("diag_exist_ok")),
+                fm.horizontalAdvance(T("diag_exist_miss")),
+                fm.horizontalAdvance(T("diag_exist_err")),
+            ) + PAD
+        else:
+            col0_w = max(
+                fm.horizontalAdvance(headers[0]),
+                fm.horizontalAdvance(T("diag_risk_high")),
+                fm.horizontalAdvance(T("diag_risk_medium")),
+                fm.horizontalAdvance(T("diag_clean")),
+            ) + PAD
+        self._diag_min_widths = [
+            col0_w,
+            fm.horizontalAdvance(headers[1]) + PAD,
+            fm.horizontalAdvance(headers[2]) + PAD,
+        ]
+        self._diag_min_last_width = fm.horizontalAdvance(headers[3]) + PAD + 10
+
         _hdr.setSectionResizeMode(QHeaderView.Interactive)
         _hdr.setStretchLastSection(True)
-        _hdr.setMinimumSectionSize(50)
-        for i, w in enumerate(widths[:-1]):
-            self.table.setColumnWidth(i, w)
+        _hdr.setMinimumSectionSize(min(self._diag_min_widths))
+        _hdr.setMaximumSectionSize(400)
+        _hdr.sectionResized.connect(self._on_diag_col_resized)
+
+        for i, w in enumerate(self._diag_min_widths):
+            self.table.setColumnWidth(i, max(widths[i], w))
+
+        class _DiagTableResizeGuard(QObject):
+            def eventFilter(self_, obj, event):
+                if event.type() == QEvent.Type.Resize:
+                    QTimer.singleShot(0, self._adjust_diag_columns_on_resize)
+                return False
+
+        self._diag_table_resize_guard = _DiagTableResizeGuard(self.table)
+        self.table.installEventFilter(self._diag_table_resize_guard)
 
         self.table.setStyleSheet(
             f"QTableWidget {{ background-color: transparent; color: {DARK['fg']}; "
@@ -257,13 +338,15 @@ class DiagnosticsPage(HOTSPage):
         del_sel_btn.fit_to_content()
         del_sel_btn.clicked.connect(self._remove_selected)
         act_lay.addWidget(del_sel_btn)
-        act_lay.addStretch()
-
-        cl.addWidget(act)
 
         self._status = QLabel("")
-        self._status.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent;")
-        cl.addWidget(self._status)
+        self._status.setStyleSheet(f"color: {DARK['fg2']}; font-size: 9pt; background: transparent; border: none;")
+        self._status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._status.setWordWrap(True)
+        self._status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        act_lay.addWidget(self._status, 1)
+
+        cl.addWidget(act)
 
     def _run(self):
         if self.mode == "existence" and not has_internet_connection():
@@ -276,6 +359,7 @@ class DiagnosticsPage(HOTSPage):
         if self._stop_btn is not None:
             self._stop_btn.setEnabled(True)
         self.table.setRowCount(0)
+        self._status.setText("")
         real = [dict(e) for e in self.entries if e["enabled"] is True]
         run_id = self._run_id
         start_bg_thread(self._scan, real, run_id)

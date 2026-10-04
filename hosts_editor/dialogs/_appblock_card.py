@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QObject, Signal, QSize, QStringListModel, QEvent, QRectF
 from PySide6.QtGui import QColor, QPalette, QPainterPath, QRegion
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget
-
+from ..icons import FIF
+from ..ui_parts import IconWidget
 from ..constants import DARK, accent_rgba
 from ..core_appblock import AppBlockManager
 from ..widgets_qt import HOTSButton, HOTSDialog, attach_line_edit_context_menu, attach_fluent_tip, colored_svg_icon
@@ -122,7 +122,7 @@ class _AppBlockRow(QWidget):
         h.setContentsMargins(10, 6, 10, 6)
         h.setSpacing(8)
 
-        from qfluentwidgets import TransparentToolButton
+        from ..ui_parts import TransparentToolButton
 
         toggle_icon = (
             FIF.POWER_BUTTON if hasattr(FIF, "POWER_BUTTON")
@@ -499,7 +499,7 @@ class _AppBlockCardMixin:
         if state["busy"]:
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, T("appblock_btn_browse"), "", "Programy (*.exe)"
+            self, T("appblock_btn_browse"), "", f"{T('appblock_filter_programs')} (*.exe)"
         )
         if not path:
             return
@@ -512,7 +512,7 @@ class _AppBlockCardMixin:
         if state["busy"]:
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, T("appblock_btn_force_unlock"), "", "Programy (*.exe)"
+            self, T("appblock_btn_force_unlock"), "", f"{T('appblock_filter_programs')} (*.exe)"
         )
         if not path:
             return

@@ -28,6 +28,8 @@ Three things, in plain terms:
 
 You don't need to understand *how* any of this works to use it — the app walks you through it.
 
+> **Looking for something simpler?** If you just want to lock down the hosts file with a custom blocklist and don't need parental controls or the privacy/telemetry module, check out **[HOTS Hosts Lite](https://github.com/darsono6/HOTS-Hosts-Lite)** — a smaller, focused sibling.
+
 <div align="center">
 
 <img src="hosts_editor/assets/screenshot_main.png" alt="Main Window" width="650"/>
@@ -77,6 +79,19 @@ See **[CODE_SIGNING.md](CODE_SIGNING.md)** for full details on why the release i
 
 ---
 
+## What's new in 2.3
+
+- **Significantly lower resource usage** — the app no longer depends on PySide6-Fluent-Widgets and runs on its own lightweight window and widgets
+- **Code optimization** throughout the application
+- **A fifth accent color**
+- **Refreshed look** and a number of small UI fixes
+- **Uninstall wizard** — instead of an all-or-nothing removal, the uninstaller now asks exactly what to undo: domain blocks + DNS-over-HTTPS + Cloudflare Family DNS, Privacy-tools changes, saved configuration, your custom domain list (kept by default), and hosts file backups. Anything left unchecked stays exactly as it was.
+- A heads-up before uninstalling: if you're only trying to install a newer version, you don't need to uninstall first — the installer now reminds you of that and lets you back out.
+- Reinstalling or updating over an existing install now starts from a clean installation folder, so files removed or renamed between versions no longer pile up on your system.
+- Fixed: Cloudflare Family DNS could stay enabled on the network adapter after uninstalling; it's now reverted along with the other domain-blocking configuration if you choose to.
+
+---
+
 ## Everything it can do
 
 <details>
@@ -117,9 +132,10 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 <details>
 <summary><strong>🎨 Other features</strong> — click to expand</summary>
 
-- Light and dark themes, 4 accent colors
+- Light and dark themes, 5 accent colors, custom window with Mica backdrop on Windows 11
 - 7 languages: English, Polski, Français, Deutsch, Español, Português, Русский
 - Optional password protection (required to open the app or uninstall it)
+- Uninstall wizard — choose exactly what to undo (domain blocks, DNS, privacy settings, saved configuration, custom domain list, hosts backups) instead of an all-or-nothing removal
 - Built-in update checker
 - Auto-elevation, single-instance guard, window geometry memory
 
@@ -145,16 +161,13 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 <details>
 <summary>For developers — click to expand</summary>
 
-**Requirements:** Python 3.10+, `PySide6`, `PySide6-Fluent-Widgets`
-
-```bash
-pip install PySide6 "PySide6-Fluent-Widgets[full]"
-```
+**Requirements:** Python 3.10+, `PySide6` and `certifi` (see `requirements.txt`)
 
 ```bash
 git clone https://github.com/darsono6/HOTS.git
 cd HOTS
-pythonw -m hosts_editor
+pip install -r requirements.txt
+pythonw hosts_editor_launcher.pyw
 ```
 
 > Must be run as **Administrator** — the hosts file is write-protected by Windows.
@@ -162,45 +175,59 @@ pythonw -m hosts_editor
 ### Project structure
 
 ```
-icon.ico                    # Windows Explorer/shortcut icon
 hosts_editor_launcher.pyw   # Single-instance guard + admin elevation entry point (build target)
 hosts_editor/
-├── __main__.py          # Entry point — UAC elevation, password prompt, language init
-├── app.py                # Main window (Fluent navigation shell)
-├── core.py               # Data logic — parse, save, import/export, DNS, parental control
-├── core_antispy.py       # Privacy engine — services, firewall rules, tasks, registry tweaks, hosts file lock
-├── core_appblock.py      # Application blocking — IFEO redirection + ACL deny on target executables, VPN client bundle
-├── core_doh.py            # DNS-over-HTTPS blocking — per-browser Group Policy enforcement + drift watchdog
-├── core_restore.py       # System Restore point creation & frequency-limit removal
-├── bg_tasks.py            # Background worker thread registry — joined on app quit to avoid Qt teardown races
-├── constants.py          # Theme colors, accent presets, paths, settings load/save
-├── widgets_qt.py         # Reusable Qt/Fluent UI components — buttons, dialogs, pages
-├── dns_utils.py          # DNS management — native interface lookup, Cloudflare Family DNS orchestration
-├── i18n.py                # Multilingual string system (EN / PL / FR / DE / ES)
-├── logo.png / logo.ico / logoS.png / logo1.png
-├── blocklists/           # Plain-text domain lists for Parental Control & telemetry blocking
+├── __main__.py             # Entry point — app startup, password prompt, language init
+├── app.py                  # Main window — hosts table, toolbar, page navigation
+├── frameless.py             # Custom window shell — title bar, DWM shadow, Mica (Win11), page stack
+├── nav_rail.py               # Side navigation rail
+├── core.py                  # Data logic — parse, save, import/export, DNS, custom domain blocking
+├── core_antispy.py         # Privacy engine — services, firewall rules, tasks, registry tweaks, hosts file lock
+├── core_appblock.py       # Application blocking — IFEO redirection + ACL deny on target executables, VPN client bundle
+├── core_doh.py               # DNS-over-HTTPS blocking — per-browser Group Policy enforcement + drift watchdog
+├── core_restore.py         # System Restore point creation & frequency-limit removal
+├── bg_tasks.py               # Background worker thread registry — joined on app quit to avoid Qt teardown races
+├── constants.py             # Theme colors, accent presets, paths, settings load/save
+├── widgets_qt.py            # Reusable Qt UI components — buttons, dialogs, pages, tooltips
+├── ui_parts.py                # Small widgets — icon widget, toolbar button, progress ring, info banner
+├── icons.py                   # Built-in SVG icon set
+├── resource_utils.py       # Base-path resolution (dev / frozen / Nuitka builds)
+├── dns_utils.py              # DNS management — native interface lookup, Cloudflare Family DNS orchestration
+├── uninstall_flow.py       # Uninstall cleanup logic — mandatory system-lock teardown + optional, wizard-driven reverts
+├── i18n.py                     # Multilingual string system (EN / PL / FR / DE / ES / PT / RU)
+├── graphic/
+│   ├── logo.png                              # About page logo
+│   ├── logo.ico                                # Window/taskbar icon
+│   ├── logo1.png                              # Splash screen shown while the app starts
+│   ├── logoS.png                              # Small logo — title bar + Support page watermark
+│   ├── support_me_on_kofi_dark.png   # Ko-fi donate button on the Support page
+│   └── paypal_donate_button.png       # PayPal donate button on the Support page
+├── blocklists/                 # Plain-text domain lists for Parental Control & telemetry blocking
 │   ├── adult.txt
 │   ├── telemetry.txt
 │   ├── youtube.txt
 │   └── ...
 └── dialogs/
-    ├── entry_dialog.py        # Add / Edit entry form
-    ├── diff_dialog.py         # Diff preview before save
-    ├── backup_page.py         # Backup Manager
+    ├── entry_dialog.py           # Add / Edit entry form
+    ├── diff_dialog.py             # Diff preview before save
+    ├── backup_page.py           # Backup Manager
     ├── diagnostics_page.py    # Domain check & malware scan
-    ├── parental_page.py       # Parental Control panel — categories, hosts file lock, app blocking
-    ├── privacy_page.py        # Privacy / telemetry control center — restore point tools, custom domains, tiered tweaks
-    ├── custom_domains_dialog.py # Editor for the "Block your own domains" free-text list
-    ├── _doh_card.py            # DNS-over-HTTPS blocking card (per-browser toggles + watchdog)
-    ├── export_dialog.py       # Export to .txt / .csv
+    ├── parental_page.py        # Parental Control panel — categories, hosts file lock, app blocking
+    ├── privacy_page.py          # Privacy / telemetry control center — restore point tools, custom domains, tiered tweaks
+    ├── custom_domains_dialog.py  # Editor for the "Block your own domains" free-text list
+    ├── _doh_card.py               # DNS-over-HTTPS blocking card (per-browser toggles + watchdog)
+    ├── _appblock_card.py       # Application / VPN client blocking card
+    ├── export_dialog.py         # Export to .txt / .csv
     ├── language_dialog.py     # Language selection
-    ├── accent_dialog.py       # Accent color picker
-    ├── support_page.py        # Support / donate window
-    ├── about_page.py          # About & update checker
+    ├── accent_dialog.py        # Accent color picker
+    ├── support_page.py         # Support / donate window
+    ├── about_page.py            # About & update checker
     ├── password_dialog.py     # Set / verify startup password
-    └── _*.py                  # Shared/internal helpers for the pages above
+    ├── uninstall_wizard.py    # Uninstall-time "what should we undo?" wizard (launched by the installer's uninstaller)
+    └── _*.py                        # Shared/internal helpers for the pages above
 ```
 
+</details>
 </details>
 
 ---
@@ -221,6 +248,14 @@ The interface language can be changed in **Options → Language**. All UI string
 
 ---
 
+## Third-party components
+
+- [PySide6](https://doc.qt.io/qtforpython-6/) (Qt for Python) — LGPLv3 / GPLv3
+- [certifi](https://github.com/certifi/python-certifi) — MPL 2.0
+- Icons: [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) © Microsoft Corporation — MIT (license text kept in `hosts_editor/icons.py`)
+
+---
+
 ## Disclaimer
 
 HOTS Hosts is provided in good faith but **without any warranty**. The author is **not responsible** for any damage, data loss, system issues, or other consequences resulting from the use of this application. Modifying the hosts file affects system-level network resolution — use with care. You use this software **at your own risk**.
@@ -237,7 +272,7 @@ Found a security issue? Please report it privately rather than opening a public 
 
 If HOTS Hosts saves you time or you simply want to say thanks:
 
-<a href="https://ko-fi.com/darsono"><img src="hosts_editor/graphic/support_me_on_kofi_dark.png" alt="Support me on Ko-fi" width="200"/></a>
+<a href="https://ko-fi.com/darsono"><img src="hosts_editor/assets/kofi_badge_dark.png" alt="Support me on Ko-fi" width="200"/></a>
 
 **Website:** [hotstools.com](https://hotstools.com)
 **Ko-fi:** [ko-fi.com/darsono](https://ko-fi.com/darsono)

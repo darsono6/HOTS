@@ -3,15 +3,14 @@ import socket
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QCheckBox, QWidget,
+    QWidget,
 )
 from PySide6.QtCore import Qt
 
-from qfluentwidgets import FluentIcon as FIF
-
+from ..icons import FIF
 from ..constants import DARK
 from ..core import is_valid_ip
-from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, attach_line_edit_context_menu
+from ..widgets_qt import HOTSDialog, HOTSButton, HOTSSwitch, h_separator, attach_line_edit_context_menu
 from ..i18n import T
 
 
@@ -103,15 +102,8 @@ class EntryDialog(HOTSDialog):
         self._com_edit.setText(entry.get("comment", "") if entry else "")
         form.addRow(_lbl(T("entry_lbl_comment")), self._com_edit)
 
-        self._enabled_cb = QCheckBox(T("entry_lbl_active"))
+        self._enabled_cb = HOTSSwitch(T("entry_lbl_active"), spacing=10)
         self._enabled_cb.setChecked(entry["enabled"] if entry else True)
-        self._enabled_cb.setStyleSheet(
-            f"QCheckBox {{ color: {DARK['fg']}; background: transparent; spacing: 10px; }}"
-            f"QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; "
-            f"border-radius: 4px; background: {DARK['indicator_bg']}; }}"
-            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}"
-            f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
-        )
         form.addRow("", self._enabled_cb)
 
         cl.addLayout(form)
@@ -239,6 +231,6 @@ class EntryDialog(HOTSDialog):
 
 
 def _lbl(text: str) -> QLabel:
-    l = QLabel(text + ":")
+    l = QLabel(text if text.endswith(":") else text + ":")
     l.setStyleSheet(f"color: {DARK['fg2']}; background: transparent;")
     return l

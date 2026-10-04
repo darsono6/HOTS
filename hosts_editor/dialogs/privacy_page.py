@@ -1,16 +1,15 @@
-import threading
 import shiboken6
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QCheckBox, QPushButton, QFrame,
+    QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QPushButton, QFrame,
 )
-from PySide6.QtCore import Qt, QSize, QObject, Signal, QTimer
+from PySide6.QtCore import Qt, QSize, QObject, Signal
 from PySide6.QtGui import QColor
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget, TransparentToolButton
-
+from ..icons import FIF
+from ..ui_parts import IconWidget, TransparentToolButton
 from ..constants import DARK
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_tip, colored_svg_icon
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_tip, colored_svg_icon, SmoothWheel, EqualHeight
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
 from ..core_antispy import AntiSpyManager, ITEMS
@@ -65,6 +64,7 @@ def _clear_layout(layout):
         item = layout.takeAt(0)
         w = item.widget()
         if w:
+            w.hide()
             w.deleteLater()
         else:
             child_layout = item.layout()
@@ -106,6 +106,7 @@ class _RstruiLockToggleSignals(QObject):
 
 class PrivacyPage(_ParentalCardMixin, HOTSPage):
     busy_changed = Signal(bool)
+    _refresh_on_show = False
 
     def __init__(self, parent=None):
         import re as _re_title
@@ -183,6 +184,8 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         self._drifted_ids = set(drifted_ids)
         if not shiboken6.isValid(self) or is_shutting_down():
             return
+        if not self.isVisible():
+            return
         if self._manual_ops_active > 0:
             self._pending_refresh = True
             return
@@ -207,6 +210,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        SmoothWheel(scroll)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         inner = QWidget()
@@ -237,25 +241,14 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         scroll.setWidget(inner)
         rl.addWidget(scroll, 1)
 
-        QTimer.singleShot(0, self._sync_privacy_module_heights)
-
-    def _sync_privacy_module_heights(self):
-        if not shiboken6.isValid(self):
-            return
-        ref_widget = getattr(self, "_restore_banner_widget", None)
-        if ref_widget is None or not shiboken6.isValid(ref_widget):
-            return
-        ref = ref_widget.height()
-        if ref <= 0:
-            return
-        for widget in (
-            getattr(self, "_rstrui_lock_card", None),
-            getattr(self, "_antispy_levels_header", None),
-            getattr(self, "_telemetry_domains_card", None),
-            getattr(self, "_custom_domains_card", None),
-        ):
-            if widget is not None and shiboken6.isValid(widget):
-                widget.setFixedHeight(ref)
+        self._height_sync = EqualHeight(restore_banner, [
+            w for w in (
+                rstrui_lock_card,
+                getattr(self, "_antispy_levels_header", None),
+                telemetry_module,
+                custom_domains_module,
+            ) if w is not None and shiboken6.isValid(w)
+        ])
 
     def _make_restore_banner(self) -> QWidget:
         outer = QWidget()
@@ -341,7 +334,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         self._restore_signals = signals
         self._track_bg_signal(signals)
 
-        import threading
 
         def worker():
             try:
@@ -908,7 +900,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
 
         signals.done.connect(_cleanup_and_handle)
 
-        import threading
 
         def worker(lvl=level, ids=selected_ids):
             err = ""
@@ -1014,7 +1005,6 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
 
         signals.done.connect(_cleanup_and_handle)
 
-        import threading
 
         def worker(s=state, t=target):
             err = ""

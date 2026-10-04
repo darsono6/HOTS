@@ -140,8 +140,6 @@ ITEMS: List[dict] = [
      "path": REG_FIND_MY_DEVICE, "name": "AllowFindMyDevice", "protect_value": 0},
 ]
 
-LEVELS = ("basic", "medium", "advanced", "extra")
-
 def _find_item(item_id: str) -> Optional[dict]:
     for it in ITEMS:
         if it["id"] == item_id:
@@ -176,7 +174,6 @@ SC_EXE = os.path.join(_SYSTEM32, "sc.exe")
 NET_EXE = os.path.join(_SYSTEM32, "net.exe")
 NETSH_EXE = os.path.join(_SYSTEM32, "netsh.exe")
 POWERSHELL_EXE = os.path.join(_SYSTEM32, "WindowsPowerShell", "v1.0", "powershell.exe")
-ICACLS_EXE = os.path.join(_SYSTEM32, "icacls.exe")
 
 HOSTS_LOCK_STATE_FILE = os.path.join(HOTS_PROGRAMDATA_DIR, "HOTS_hosts_lock_state.json")
 HOSTS_LOCK_SID = "S-1-5-32-545"

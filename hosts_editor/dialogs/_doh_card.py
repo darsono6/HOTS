@@ -1,4 +1,3 @@
-import threading
 import time
 
 import shiboken6
@@ -9,8 +8,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QObject, Signal, QTimer
 from PySide6.QtGui import QColor
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget
-
+from ..icons import FIF
+from ..ui_parts import IconWidget
 from ..constants import DARK
 from ..core_doh import BROWSERS, DohBlockManager
 from ..widgets_qt import HOTSButton, HOTSDialog, attach_fluent_tip, colored_svg_icon
@@ -35,7 +34,7 @@ class _DohRow(QWidget):
         h.setContentsMargins(10, 6, 10, 6)
         h.setSpacing(8)
 
-        from qfluentwidgets import TransparentToolButton
+        from ..ui_parts import TransparentToolButton
 
         toggle_icon = (
             FIF.POWER_BUTTON if hasattr(FIF, "POWER_BUTTON")
@@ -57,8 +56,9 @@ class _DohRow(QWidget):
                 + _hover_rules
             )
         else:
+            border_color = DARK['accent'] if installed else DARK['border']
             toggle_btn.setStyleSheet(
-                f"QToolButton {{ background: transparent; border: 1px solid {DARK['border']}; "
+                f"QToolButton {{ background: transparent; border: 1px solid {border_color}; "
                 f"border-radius: 5px; }}"
                 + _hover_rules
             )

@@ -1,0 +1,29 @@
+name: Ping IndexNow
+
+# Fires whenever anything under public/ changes on main - keep this in
+# whatever repo/branch actually deploys hotstools.com to Cloudflare Pages.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "public/**"
+  workflow_dispatch: {} # lets you trigger it manually from the Actions tab too
+
+jobs:
+  ping-indexnow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit URLs to IndexNow
+        run: |
+          curl -s -X POST "https://api.indexnow.org/indexnow" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "host": "hotstools.com",
+              "key": "f3b113b3e20901645eb1341e96c870a8",
+              "keyLocation": "https://hotstools.com/f3b113b3e20901645eb1341e96c870a8.txt",
+              "urlList": [
+                "https://hotstools.com/",
+                "https://hotstools.com/hosts/",
+                "https://hotstools.com/lite/"
+              ]
+            }'

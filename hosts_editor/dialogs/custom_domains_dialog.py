@@ -2,13 +2,11 @@ import os
 import re
 
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QTextEdit
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextBlockFormat, QTextCursor
 
-from qfluentwidgets import FluentIcon as FIF
-
+from ..icons import FIF
 from ..constants import DARK
-from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, attach_text_edit_context_menu
+from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, attach_text_edit_context_menu, SmoothWheel
 from ..i18n import T
 
 _DOMAIN_RE = re.compile(
@@ -53,6 +51,7 @@ class CustomDomainsDialog(HOTSDialog):
         cl.addWidget(hint)
 
         self._edit = QTextEdit()
+        SmoothWheel(self._edit)
         self._edit.setPlaceholderText(T("par_custom_placeholder"))
         self._edit.setAcceptRichText(False)
         self._edit.setStyleSheet(

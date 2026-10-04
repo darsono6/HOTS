@@ -55,51 +55,6 @@ def _is_admin() -> bool:
     except Exception:
         return False
 
-_INSTALLER_HINTS = ("setup", "install", "unins", "update", "crash", "repair")
-
-
-def _norm(text: str) -> str:
-    return "".join(ch for ch in text.lower() if ch.isalnum())
-
-
-def _exe_score(exe_path: str, display_norm: str, from_icon: bool) -> int:
-    stem = _norm(os.path.splitext(os.path.basename(exe_path))[0])
-    score = 3 if from_icon else 0
-    if any(hint in stem for hint in _INSTALLER_HINTS):
-        score -= 100
-    if len(stem) >= 3 and stem in display_norm:
-        score += 10
-    return score
-
-
-def _pick_main_exe(display_name: str, icon_exe: str, scan_dirs: list, parent_dirs: list) -> str:
-    display_norm = _norm(display_name)
-    candidates = {}
-    if icon_exe:
-        candidates[icon_exe] = _exe_score(icon_exe, display_norm, True)
-    for folder, need_name_match in [(d, False) for d in scan_dirs] + [(d, True) for d in parent_dirs]:
-        try:
-            names = sorted(os.listdir(folder), key=str.lower)
-        except OSError:
-            continue
-        for fn in names:
-            if not fn.lower().endswith(".exe"):
-                continue
-            path = os.path.join(folder, fn)
-            if path in candidates:
-                continue
-            score = _exe_score(path, display_norm, False)
-            if need_name_match and score < 10:
-                continue
-            candidates[path] = score
-    if not candidates:
-        return ""
-    best_path, best_score = max(candidates.items(), key=lambda kv: kv[1])
-    if best_score < 0 or not os.path.isfile(best_path):
-        return ""
-    return best_path
-
-
 @dataclass
 class BlockedApp:
     exe_name: str
@@ -143,30 +98,27 @@ class AppBlockManager:
                             except FileNotFoundError:
                                 pass
 
-                            icon_path = ""
+                            exe_path = ""
                             try:
                                 icon = winreg.QueryValueEx(k, "DisplayIcon")[0]
-                                if isinstance(icon, str):
-                                    icon_path = icon.split(",")[0].strip('"').strip()
-                            except OSError:
-                                pass
-                            icon_exe = (icon_path if icon_path.lower().endswith(".exe")
-                                        and os.path.isfile(icon_path) else "")
-
-                            install_loc = ""
-                            try:
-                                value = winreg.QueryValueEx(k, "InstallLocation")[0]
-                                if isinstance(value, str):
-                                    install_loc = value
-                            except OSError:
+                                icon = icon.split(",")[0].strip('"').strip()
+                                if icon.lower().endswith(".exe") and os.path.isfile(icon):
+                                    exe_path = icon
+                            except FileNotFoundError:
                                 pass
 
-                            icon_dir = os.path.dirname(icon_path) if icon_path else ""
-                            scan_dirs = [d for d in (install_loc, icon_dir) if d and os.path.isdir(d)]
-                            parent_dirs = [os.path.dirname(icon_dir)] if icon_dir else []
+                            if not exe_path:
+                                try:
+                                    install_loc = winreg.QueryValueEx(k, "InstallLocation")[0]
+                                    if install_loc and os.path.isdir(install_loc):
+                                        for fn in os.listdir(install_loc):
+                                            if fn.lower().endswith(".exe"):
+                                                exe_path = os.path.join(install_loc, fn)
+                                                break
+                                except (FileNotFoundError, OSError):
+                                    pass
 
-                            exe_path = _pick_main_exe(display_name, icon_exe, scan_dirs, parent_dirs)
-                            if exe_path:
+                            if exe_path and os.path.isfile(exe_path):
                                 results[display_name] = os.path.normpath(exe_path)
                     except OSError:
                         continue

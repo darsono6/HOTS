@@ -9,12 +9,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QObject
 import shiboken6
 
-from qfluentwidgets import FluentIcon as FIF
-
+from ..icons import FIF
 from ..constants import DARK, accent_rgba
 from ..core import list_backups, restore_from_backup, HostsBusyError
 from ..core_antispy import HostsLockError
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_table_tip
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_table_tip, SmoothWheel
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
 
@@ -88,6 +87,7 @@ class BackupManagerPage(HOTSPage):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        SmoothWheel(self.table)
 
         self.table.setStyleSheet(
             f"QTableWidget {{ background-color: transparent; color: {DARK['fg']}; "

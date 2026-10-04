@@ -2,13 +2,13 @@ import os
 import weakref
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
-from PySide6.QtCore import Qt, Signal, QObject, QTimer
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QColor
 import shiboken6
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget
-
-from ..constants import DARK, load_settings, save_settings, accent_rgba, custom_domains_path
+from ..icons import FIF
+from ..ui_parts import IconWidget
+from ..constants import DARK, accent_rgba, custom_domains_path
 from ..core import toggle_parental_control, HostsLimitExceeded, HostsBusyError, MAX_ACTIVE_ENTRIES
 from ..core_antispy import HostsLockError
 from ..widgets_qt import HOTSButton, HOTSDialog, attach_fluent_tip, colored_svg_icon

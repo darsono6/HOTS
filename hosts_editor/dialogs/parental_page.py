@@ -1,26 +1,25 @@
 import os
-import threading
 import shiboken6
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea,
 )
-from PySide6.QtCore import Qt, QSize, QObject, Signal, QTimer
+from PySide6.QtCore import Qt, QObject, Signal
 from PySide6.QtGui import QColor
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget
-
+from ..icons import FIF
+from ..ui_parts import IconWidget
 from ..constants import DARK
 from ..core import toggle_parental_control, get_parental_active_map, HostsBusyError
 from ..core_antispy import HostsLockError, HostsLockManager
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_tip, make_folder_button, colored_svg_icon
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_tip, make_folder_button, colored_svg_icon, SmoothWheel, EqualHeight
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
 from ..dns_utils import is_cf_family_active, enable_cf_family_dns, disable_cf_family_dns
 
 from ._parental_shared import (
     CATEGORIES, _CATEGORY_COMMENT, _CF_ACCENT, _blocklists_dir,
-    _InfoButton, _ParentalCardMixin,
+    _InfoButton, _ParentalCardMixin, any_info_popup_open,
 )
 from ._appblock_card import _AppBlockCardMixin
 from ._doh_card import _DohBlockCardMixin
@@ -41,6 +40,7 @@ def _clear_layout(layout):
         item = layout.takeAt(0)
         w = item.widget()
         if w:
+            w.hide()
             w.deleteLater()
         else:
             child_layout = item.layout()
@@ -49,6 +49,8 @@ def _clear_layout(layout):
 
 
 class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, HOTSPage):
+    _refresh_on_show = False
+
     def __init__(self, parent=None):
         import re as _re_title
         clean_title = _re_title.sub(r"[^\w\s/.:,!?()-]", "", T("par_title")).strip()
@@ -57,11 +59,15 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         self._states = {}
         self._toggle_signal_refs = []
         self._parent_win = parent
+        self._built = False
 
     def refresh_content(self):
+        if self._built and (self._busy_count > 0 or any_info_popup_open()):
+            return
         self._states = {}
         _clear_layout(self.content_layout)
         self._build()
+        self._built = True
 
     def _open_blocklists_folder(self):
         try:
@@ -95,6 +101,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        SmoothWheel(scroll)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         inner = QWidget()
@@ -122,25 +129,14 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         scroll.setWidget(inner)
         rl.addWidget(scroll, 1)
 
-        QTimer.singleShot(0, self._sync_card_heights)
-
-    def _sync_card_heights(self):
-        if not shiboken6.isValid(self):
-            return
-        hosts_card = getattr(self, "_hosts_lock_card", None)
-        if hosts_card is None or not shiboken6.isValid(hosts_card):
-            return
-        ref = hosts_card.height()
-        if ref <= 0:
-            return
-        for widget in (
-            getattr(self, "_cf_card_widget", None),
-            getattr(self, "_appblock_header", None),
-            getattr(self, "_doh_header", None),
-            getattr(self, "_categories_header", None),
-        ):
-            if widget is not None and shiboken6.isValid(widget):
-                widget.setFixedHeight(ref)
+        self._height_sync = EqualHeight(hosts_lock_card, [
+            w for w in (
+                getattr(self, "_cf_card_widget", None),
+                getattr(self, "_appblock_header", None),
+                getattr(self, "_doh_header", None),
+                getattr(self, "_categories_header", None),
+            ) if w is not None and shiboken6.isValid(w)
+        ])
 
     def _make_hosts_lock_card(self) -> QWidget:
         active = HostsLockManager.is_active()

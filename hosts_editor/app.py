@@ -1,48 +1,33 @@
 import os
 import re
 import sys
-import copy
-import time
 import math
 import ctypes
 import ctypes.wintypes
-import difflib
 import shiboken6
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QSplitter, QVBoxLayout, QHBoxLayout,
-    QLabel, QFrame, QLineEdit, QTableView,
-    QHeaderView, QAbstractItemView, QScrollArea, QSizePolicy,
-    QTextEdit, QMenu, QApplication, QFileDialog, QStyledItemDelegate,
-    QGraphicsOpacityEffect,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QLineEdit, QTableView, QHeaderView, QAbstractItemView,
+    QSizePolicy, QTextEdit, QApplication, QFileDialog,
+    QStyledItemDelegate, QGraphicsOpacityEffect,
 )
 from PySide6.QtCore import (
     Qt, QThread, Signal, QTimer, QPoint, QSize, QRect, QObject, QProcess,
     QAbstractTableModel, QModelIndex, QPropertyAnimation, QEasingCurve,
 )
 from PySide6.QtGui import (
-    QColor, QFont, QIcon, QPixmap, QAction, QSyntaxHighlighter, QTextCharFormat, QPalette,
-    QCursor, QGuiApplication, QPainter, QPen,
+    QColor, QFont, QIcon, QPixmap, QSyntaxHighlighter, QTextCharFormat, QCursor, QGuiApplication,
+    QPainter, QPen,
 )
 
-from qfluentwidgets import (
-    FluentWindow, NavigationItemPosition, FluentIcon, NavigationDisplayMode,
-    PushButton, ToolButton, SearchLineEdit, BodyLabel, TitleLabel,
-    SubtitleLabel, CaptionLabel, CardWidget, ScrollArea,
-    ToggleButton, SwitchButton, InfoBar, InfoBarIcon, InfoBarPosition,
-    MessageBox, Dialog, StateToolTip, ProgressBar, Flyout,
-    FlyoutViewBase, setTheme, Theme, setThemeColor,
-    TransparentPushButton,
-)
-from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets.common.router import qrouter
-try:
-    from qfluentwidgets import IndeterminateProgressRing
-except ImportError:
-    IndeterminateProgressRing = None
+from .icons import FIF
+from .ui_parts import InfoBanner, IndeterminateProgressRing
+from .nav_rail import NavRail
+from .frameless import FramelessWindow
 
-from .constants import DARK, HOSTS_PATH, IS_LIGHT_THEME, accent_rgba, load_settings, save_settings
-from .i18n import T, set_lang, current_lang, LANGUAGES
+from .constants import DARK, DEFAULT_ACCENT, HOSTS_PATH, accent_rgba, load_settings, save_settings
+from .i18n import T, set_lang, current_lang
 from .core import (
     parse_hosts, save_hosts, entries_to_text,
     import_from_path, export_to_path, is_valid_ip, MAX_ACTIVE_ENTRIES,
@@ -53,10 +38,9 @@ from .core_appblock import AppBlockManager
 from .core_doh import DohBlockManager
 from .bg_tasks import start_bg_thread, is_shutting_down, register_qthread, register_wakeup
 from .widgets_qt import (
-    HOTSButton, HOTSDialog, apply_global_style, h_separator,
-    v_separator, enable_rounded_corners,
-    HOTSContextMenu, attach_line_edit_context_menu, attach_text_edit_context_menu,
-    attach_fluent_tip, make_folder_button, colored_svg_icon,
+    HOTSButton, HOTSDialog, enable_rounded_corners, HOTSContextMenu,
+    attach_line_edit_context_menu, attach_text_edit_context_menu,
+    make_folder_button, colored_svg_icon, SmoothWheel,
 )
 
 _ACCENT_GOLD = QColor(DARK["accent"])
@@ -116,7 +100,7 @@ def _parse_saved_geometry(geo_str: str):
     m = re.match(r"^(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?$", geo_str or "")
     if not m:
 
-        return 900, 640, None, None
+        return 900, 650, None, None
     w, h = int(m.group(1)), int(m.group(2))
     if m.group(3) is None:
         return w, h, None, None
@@ -359,7 +343,8 @@ class _PulsingFrame(QFrame):
             self.clicked.emit()
         super().mousePressEvent(event)
 
-class HostsEditor(FluentWindow):
+class HostsEditor(FramelessWindow):
+    MIN_WINDOW_SIZE = (900, 650)
     def __init__(self, on_before_show=None):
         super().__init__()
 
@@ -374,12 +359,8 @@ class HostsEditor(FluentWindow):
 
         self._page_route_map: dict = {}
 
-        self._options_nav_widgets: set = set()
-        self._options_click_guard_ts = 0.0
-        self._options_click_guard_ms = 350
-
-        setTheme(Theme.LIGHT if IS_LIGHT_THEME else Theme.DARK)
-        setThemeColor(_ACCENT_GOLD)
+        self._options_menu = None
+        self._options_menu_was_open = False
 
         self.setWindowTitle("HOTS Hosts")
         w, h, x, y = _parse_saved_geometry(self._settings.get("geometry", ""))
@@ -390,35 +371,24 @@ class HostsEditor(FluentWindow):
             cx, cy = _centered_position(w, h)
             if cx is not None and cy is not None:
                 self.move(cx, cy)
-        self.setMinimumSize(900, 650)
+        self.setMinimumSize(*self.MIN_WINDOW_SIZE)
 
-        _ico = self._find_asset("logo.ico")
+        _ico = self._find_asset("graphic/logo.ico")
         if _ico:
             self.setWindowIcon(QIcon(_ico))
 
-        _logo_top = self._find_asset("logoS.png")
+        _logo_top = self._find_asset("graphic/logoS.png")
 
         self._build_main_view()
         self._build_navigation()
-        self.navigationInterface.setExpandWidth(200)
-        self.navigationInterface.setMinimumExpandWidth(820)
-        if str(self._settings.get("nav_expanded", "")).strip().lower() in ("1", "true", "yes"):
-            self.navigationInterface.expand(useAni=False)
+        self._sync_check_dom_tile()
         self._build_backup_page()
 
         self._load()
 
         try:
-            tb = self.titleBar
-            tb.titleLabel.setStyleSheet(
-                f"color: {DARK['accent']}; font-size: 13pt; font-weight: bold; background: transparent;"
-            )
             if _logo_top:
                 self._setup_top_logo(_logo_top)
-            try:
-                self.navigationInterface.setReturnButtonVisible(True)
-            except Exception:
-                pass
         except Exception as e:
             print(f"Titlebar customization warning: {e}")
 
@@ -508,7 +478,10 @@ class HostsEditor(FluentWindow):
             state = self.windowState()
             if state & Qt.WindowMinimized:
                 self.setWindowState((state & ~Qt.WindowMinimized) | Qt.WindowActive)
-            self.showNormal()
+            if self.isFullscreenMode() or (state & (Qt.WindowMaximized | Qt.WindowFullScreen)):
+                self.show()
+            else:
+                self.showNormal()
             self.raise_()
             self.activateWindow()
             hwnd = int(self.winId())
@@ -533,12 +506,6 @@ class HostsEditor(FluentWindow):
 
     def eventFilter(self, obj, event):
         from PySide6.QtCore import QEvent
-
-        if event.type() == QEvent.Type.MouseButtonPress and obj in self._options_nav_widgets:
-            now = time.monotonic()
-            if (now - self._options_click_guard_ts) * 1000 < self._options_click_guard_ms:
-                return True
-            self._options_click_guard_ts = now
 
         if event.type() == QEvent.Type.MouseButtonPress and obj in (
             getattr(self, "_toolbar_frame", None),
@@ -617,14 +584,13 @@ class HostsEditor(FluentWindow):
                                      key=("basic", "medium", "advanced", "extra").index)
             modules_txt = ", ".join(names_map[lvl] for lvl in levels_drifted)
 
-            bar = InfoBar(
-                icon=InfoBarIcon.WARNING,
+            bar = InfoBanner(
+                kind="warning",
                 title=T("antispy_watchdog_title"),
                 content=T("antispy_watchdog_msg", modules=modules_txt),
                 orient=Qt.Vertical,
-                isClosable=True,
+                closable=True,
                 duration=-1,
-                position=InfoBarPosition.TOP,
                 parent=self,
             )
             reapply_btn = HOTSButton(FIF.SYNC, DARK["accent"], T("antispy_watchdog_reapply_btn"))
@@ -678,13 +644,12 @@ class HostsEditor(FluentWindow):
                                   key=("basic", "medium", "advanced", "extra").index)
         modules_txt = ", ".join(names_map[lvl] for lvl in levels_restored)
 
-        InfoBar.info(
+        InfoBanner.info(
             title=T("antispy_watchdog_restored_title"),
             content=T("antispy_watchdog_restored_msg", modules=modules_txt),
             orient=Qt.Vertical,
-            isClosable=True,
+            closable=True,
             duration=5000,
-            position=InfoBarPosition.TOP,
             parent=self,
         )
 
@@ -711,13 +676,12 @@ class HostsEditor(FluentWindow):
     def _show_update_available_hud(self, tag: str, url: str):
         self._dismiss_update_hud()
         self._update_release_url = url
-        self._update_infobar = InfoBar.info(
+        self._update_infobar = InfoBanner.info(
             title=T("update_hud_title"),
             content=T("update_hud_msg", version=tag),
             orient=Qt.Horizontal,
-            isClosable=True,
+            closable=True,
             duration=-1,
-            position=InfoBarPosition.TOP,
             parent=self,
         )
 
@@ -756,23 +720,21 @@ class HostsEditor(FluentWindow):
                     except Exception as e:
                         print(f"Hosts lock watchdog warning: {e}")
             if result == "regressed":
-                InfoBar.warning(
+                InfoBanner.warning(
                     title=T("hosts_lock_watchdog_title"),
                     content=T("hosts_lock_drift_regressed"),
                     orient=Qt.Vertical,
-                    isClosable=True,
+                    closable=True,
                     duration=-1,
-                    position=InfoBarPosition.TOP,
                     parent=self,
                 )
             elif result == "restored":
-                InfoBar.info(
+                InfoBanner.info(
                     title=T("hosts_lock_watchdog_title"),
                     content=T("hosts_lock_drift_restored"),
                     orient=Qt.Vertical,
-                    isClosable=True,
+                    closable=True,
                     duration=5000,
-                    position=InfoBarPosition.TOP,
                     parent=self,
                 )
         except Exception as e:
@@ -806,13 +768,12 @@ class HostsEditor(FluentWindow):
                     page._appblock_refresh_list(state)
                     page._appblock_refresh_vpn_btn(state)
 
-                InfoBar.warning(
+                InfoBanner.warning(
                     title=T("appblock_watchdog_title"),
                     content=T("appblock_drift_regressed", apps=", ".join(result["regressed"])),
                     orient=Qt.Vertical,
-                    isClosable=True,
+                    closable=True,
                     duration=-1,
-                    position=InfoBarPosition.TOP,
                     parent=self,
                 )
         except Exception as e:
@@ -844,13 +805,12 @@ class HostsEditor(FluentWindow):
                 if state is not None:
                     page._doh_refresh_list(state)
 
-                InfoBar.warning(
+                InfoBanner.warning(
                     title=T("doh_watchdog_title"),
                     content=T("doh_drift_regressed", browsers=", ".join(result["regressed"])),
                     orient=Qt.Vertical,
-                    isClosable=True,
+                    closable=True,
                     duration=-1,
-                    position=InfoBarPosition.TOP,
                     parent=self,
                 )
         except Exception as e:
@@ -886,12 +846,11 @@ class HostsEditor(FluentWindow):
             print(f"AntiSpy watchdog warning: {e}")
 
         if all(results.values()):
-            InfoBar.success(
+            InfoBanner.success(
                 title=T("save_success_title"),
                 content=T("antispy_watchdog_reapply_success"),
                 orient=Qt.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
+                closable=True,
                 duration=3000,
                 parent=self,
             )
@@ -904,47 +863,43 @@ class HostsEditor(FluentWindow):
 
     def _setup_top_logo(self, path: str):
         try:
-            tb = self.titleBar
-            if hasattr(tb, "iconLabel"):
-                tb.iconLabel.hide()
-            tb.titleLabel.hide()
-
             pix = QPixmap(path)
             if pix.isNull():
                 return
 
-            dpr = self.devicePixelRatioF() or 1.0
-
+            tb = self.titleBar
             margin = 6
             scale_factor = 0.50
             target_h = max(int((tb.height() - margin) * scale_factor), 12)
-            scaled = pix.scaledToHeight(
-                max(math.ceil(target_h * dpr), 1), Qt.SmoothTransformation
-            )
+
+            dpr = self.devicePixelRatioF() or 1.0
+            target_h_px = max(1, math.ceil(target_h * dpr))
+            scaled = pix.scaledToHeight(target_h_px, Qt.SmoothTransformation)
             scaled.setDevicePixelRatio(dpr)
 
-            self._logo_lbl = QLabel(tb)
-            self._logo_lbl.setPixmap(scaled)
-            self._logo_lbl.setAttribute(Qt.WA_TransparentForMouseEvents)
-            self._logo_lbl.setStyleSheet("background: transparent;")
-            self._logo_lbl.adjustSize()
-
-            start_x = tb.iconLabel.x() if hasattr(tb, "iconLabel") else 10
-            y = (tb.height() - self._logo_lbl.height()) // 2
-            self._logo_lbl.move(start_x, y)
-            self._logo_lbl.show()
-            self._logo_lbl.raise_()
+            tb.set_logo(scaled, left_margin=10)
         except Exception as e:
             print(f"Top logo setup warning: {e}")
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        QTimer.singleShot(0, self._adjust_columns_on_resize)
 
     def _find_asset(self, name: str) -> str:
         from .resource_utils import resource_path
         p = resource_path(name)
         return p if os.path.exists(p) else ""
+
+    _RAIL_KEYS = {"mainWidget": "home", "about": "options", "support": "options",
+                 "password": "options", "language": "options", "theme": "options"}
+
+    def _sync_rail(self):
+        widget = self.stackedWidget.currentWidget()
+        if widget is None:
+            return
+        if widget is self._main_widget:
+            key = "rawview" if self._raw_mode else "home"
+        else:
+            key = self._page_route_map.get(widget.objectName(), widget.objectName())
+            key = self._RAIL_KEYS.get(key, key)
+        self._rail.set_current(key if self._rail.tile(key) is not None else None)
+        self._sync_check_dom_tile()
 
     def _nav(self, fn, route_key=None):
         def _wrapper():
@@ -954,11 +909,13 @@ class HostsEditor(FluentWindow):
 
             def _deferred():
                 fn()
-                if route_key:
-                    current = self.stackedWidget.currentWidget()
-                    if current is not None and current is not self._main_widget:
-                        self._page_route_map[current.objectName()] = route_key
-                    self.navigationInterface.setCurrentItem(route_key)
+                # Always refresh the rail: actions without a route_key (password/language/theme)
+                # only open a dialog and stay on the same page. Register a new route only when
+                # route_key is set, so those actions cannot overwrite the current page's route.
+                current = self.stackedWidget.currentWidget()
+                if route_key and current is not None and current is not self._main_widget:
+                    self._page_route_map[current.objectName()] = route_key
+                self._sync_rail()
                 if had_selection and hasattr(self, "table"):
                     sel_model = self.table.selectionModel()
                     if sel_model is not None and not sel_model.hasSelection():
@@ -969,42 +926,61 @@ class HostsEditor(FluentWindow):
         return _wrapper
 
     def _build_navigation(self):
-        nav = self.navigationInterface
+        self._rail = NavRail(self)
+        self._rail.set_logo(self._find_asset("graphic/logo1.png"))
+        self.hBoxLayout.insertWidget(0, self._rail)
+        self.setTitleBarOffset(NavRail.WIDTH)
 
-        nav.addItem(routeKey="check_dom", icon=FIF.SEARCH,    text=T("btn_check_dom"),   tooltip=T("btn_check_dom"), onClick=self._nav(self._diag_existence, "check_dom"), position=NavigationItemPosition.TOP)
-        nav.addItem(routeKey="malware",   icon=FIF.VPN,       text=T("btn_malware"),     tooltip=T("btn_malware"),   onClick=self._nav(self._diag_malware, "malware"), position=NavigationItemPosition.TOP)
-        nav.addItem(routeKey="rawview",   icon=FIF.DOCUMENT,  text=T("opt_show_raw"),    tooltip=T("opt_show_raw"),  onClick=self._nav(self._show_raw_view, "rawview"), position=NavigationItemPosition.TOP)
-        nav.addItem(routeKey="parental",  icon=FIF.PEOPLE,    text=T("btn_parental"),    tooltip=T("btn_parental"),  onClick=self._nav(self._open_parental_control, "parental"), position=NavigationItemPosition.TOP)
-        nav.addItem(routeKey="privacy",   icon=FIF.HIDE,      text=T("btn_privacy"),     tooltip=T("btn_privacy"),   onClick=self._nav(self._open_privacy, "privacy"), position=NavigationItemPosition.TOP)
+        def _go_home():
+            self.switchTo(self._main_widget)
+            self._show_table_view()
+            self._sync_rail()
 
-        nav.addItem(routeKey="options",   icon=FIF.SETTING,   text=T("btn_options"),     tooltip=T("btn_options"),   selectable=False,        position=NavigationItemPosition.BOTTOM)
-        nav.addItem(routeKey="about",     icon=FIF.INFO,      text=T("opt_about"),       onClick=self._nav(self._about, "about"),     position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
-        nav.addItem(routeKey="support",   icon=FIF.HEART,     text=T("opt_support"),     onClick=self._nav(self._support, "support"),   position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
-        nav.addItem(routeKey="password",  icon=FIF.HIDE,      text=T("opt_pass_off"),    onClick=self._nav(self._manage_password), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
-        nav.addItem(routeKey="language",  icon=FIF.GLOBE,     text=T("opt_language"),    onClick=self._nav(self._change_language), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
-        nav.addItem(routeKey="theme",     icon=FIF.PALETTE,   text=T("opt_appearance"),      onClick=self._nav(self._change_accent_color), position=NavigationItemPosition.BOTTOM, parentRouteKey="options")
+        rail = self._rail
+        rail.add_tile("home",      FIF.HOME,    "HOTS Hosts",        on_click=_go_home)
+        rail.add_tile("check_dom", FIF.SEARCH,  T("btn_check_dom"),  on_click=self._nav(self._diag_existence, "check_dom"))
+        rail.add_tile("malware",   FIF.VPN,     T("btn_malware"),    on_click=self._nav(self._diag_malware, "malware"))
+        rail.add_tile("rawview",   FIF.DOCUMENT, T("opt_show_raw"),  on_click=self._nav(self._show_raw_view, "rawview"))
+        rail.add_tile("parental",  FIF.PEOPLE,  T("btn_parental"),   on_click=self._nav(self._open_parental_control, "parental"))
+        rail.add_tile("privacy",   FIF.HIDE,    T("btn_privacy"),    on_click=self._nav(self._open_privacy, "privacy"))
 
-        nav.displayModeChanged.connect(lambda _m: self._sync_menu_button_tooltip())
-        self._sync_menu_button_tooltip()
+        options_tile = rail.add_tile("options", FIF.SETTING, T("btn_options"),
+                                     on_click=self._on_options_clicked, bottom=True)
+        # The menu already closes on MouseButtonPress (app-level filter),
+        # so onClick must not reopen it immediately.
+        options_tile.pressed.connect(self._remember_options_menu_state)
+        rail.set_current("home")
 
-        for _rk in ("options", "about", "support", "rawview", "password", "language", "theme"):
-            _w = nav.widget(_rk)
-            if _w is not None:
-                self._options_nav_widgets.add(_w)
-                _w.installEventFilter(self)
-
-        for _rk in ("about", "support", "rawview", "password", "language", "theme"):
-            _w = nav.widget(_rk)
-            if _w is not None:
-                _w.nodeDepth = 0
-                _w.update()
-
-    def _sync_menu_button_tooltip(self):
-        is_expanded = self.navigationInterface.panel.displayMode in (
-            NavigationDisplayMode.EXPAND, NavigationDisplayMode.MENU
+    def _remember_options_menu_state(self):
+        menu = self._options_menu
+        self._options_menu_was_open = bool(
+            menu is not None and shiboken6.isValid(menu) and menu.isVisible()
         )
-        text = T("nav_menu_close") if is_expanded else T("nav_menu_open")
-        self.navigationInterface.panel.menuButton.setToolTip(text)
+
+    def _on_options_clicked(self):
+        if self._options_menu_was_open:
+            self._options_menu_was_open = False
+            return
+        try:
+            from .__main__ import _reg_get_password
+            has_password = bool(_reg_get_password())
+        except Exception:
+            has_password = False
+        items = [
+            ("\u2139",     DARK["fg2"],    T("opt_about"),      self._nav(self._about, "about")),
+            ("\u2665",     DARK["red"],    T("opt_support"),    self._nav(self._support, "support")),
+            ("\U0001F512", "#e0b040",      T("opt_pass_on") if has_password else T("opt_pass_off"),
+                                                                 self._nav(self._manage_password)),
+            None,
+            ("\U0001F310", "#60c8ff",      T("opt_language"),   self._nav(self._change_language)),
+            ("\U0001F3A8", DARK["accent"], T("opt_appearance"), self._nav(self._change_accent_color)),
+        ]
+        menu = HOTSContextMenu(self, items)
+        self._options_menu = menu
+        menu.adjustSize()
+        tile = self._rail.tile("options")
+        anchor = tile.mapToGlobal(QPoint(tile.width(), tile.height()))
+        menu.popup(QPoint(anchor.x() + 4, anchor.y() - menu.height()))
 
     def _build_main_view(self):
         self._main_widget = QWidget()
@@ -1031,7 +1007,10 @@ class HostsEditor(FluentWindow):
         self._raw_widget   = self._build_raw_view()
         self._raw_widget.hide()
 
-        root.addSpacing(12)
+        # A widget rather than addSpacing(), so the gap is hidden together with the toolbar in raw mode.
+        self._table_top_gap = QWidget()
+        self._table_top_gap.setFixedHeight(12)
+        root.addWidget(self._table_top_gap)
         root.addWidget(self._table_widget, 1)
         root.addWidget(self._raw_widget,   1)
         root.addSpacing(12)
@@ -1040,69 +1019,53 @@ class HostsEditor(FluentWindow):
 
         self._setup_deselect_on_outside_click()
 
-        self.addSubInterface(interface=self._main_widget, icon=FIF.HOME, text="HOTS Hosts")
-        self.navigationInterface.widget("mainWidget").clicked.connect(self._show_table_view)
+        self.stackedWidget.addWidget(self._main_widget)
 
     def _build_backup_page(self):
         from .dialogs import BackupManagerPage
         self._backup_page = BackupManagerPage(self, HOSTS_PATH, on_restore=self._load,
                                               on_backup_count_changed=self._update_status,
                                               on_restore_default=self._restore_default)
-        self.addSubInterface(interface=self._backup_page, icon=FIF.SAVE, text=T("bak_title"))
-        self.navigationInterface.widget("backupInterface").hide()
+        self.stackedWidget.addWidget(self._backup_page)
 
         from .dialogs import DiagnosticsPage
         self._diagnostics_page = DiagnosticsPage(self)
-        self.addSubInterface(interface=self._diagnostics_page, icon=FIF.SEARCH, text=T("diag_title_existence"))
-        self.navigationInterface.widget("diagnosticsInterface").hide()
+        self.stackedWidget.addWidget(self._diagnostics_page)
 
         from .dialogs import ParentalPage
         self._parental_page = ParentalPage(self)
-        self.addSubInterface(interface=self._parental_page, icon=FIF.PEOPLE, text=self._parental_page._title_text)
-        self.navigationInterface.widget("parentalInterface").hide()
+        self.stackedWidget.addWidget(self._parental_page)
 
         from .dialogs import PrivacyPage
         self._privacy_page = PrivacyPage(self)
-        self.addSubInterface(interface=self._privacy_page, icon=FIF.HIDE, text=self._privacy_page._title_text)
-        self.navigationInterface.widget("privacyInterface").hide()
+        self.stackedWidget.addWidget(self._privacy_page)
         self._antispy_drifted_ids = set()
         self._privacy_page.busy_changed.connect(self._set_navigation_locked)
 
         from .dialogs import SupportPage
         self._support_page = SupportPage(self)
-        self.addSubInterface(interface=self._support_page, icon=FIF.HEART, text=T("sup_title"))
-        self.navigationInterface.widget("supportInterface").hide()
+        self.stackedWidget.addWidget(self._support_page)
 
         from .dialogs import AboutPage
         self._about_page = AboutPage(self)
-        self.addSubInterface(interface=self._about_page, icon=FIF.INFO, text=self._about_page._title_text)
-        self.navigationInterface.widget("aboutInterface").hide()
+        self.stackedWidget.addWidget(self._about_page)
 
         self.stackedWidget.currentChanged.connect(self._on_stack_changed)
 
     def _set_navigation_locked(self, locked: bool):
-        self.navigationInterface.setEnabled(not locked)
         tip = T("priv_nav_locked_tooltip") if locked else ""
-        attach_fluent_tip(self.navigationInterface, tip)
-
-    def _onCurrentInterfaceChanged(self, index: int):
-
-        widget = self.stackedWidget.widget(index)
-        if widget is not None:
-            visible_key = self._page_route_map.get(widget.objectName(), widget.objectName())
-            self.navigationInterface.setCurrentItem(visible_key)
-            qrouter.push(self.stackedWidget, widget.objectName())
-        self._updateStackedBackground()
+        self._rail.set_locked(locked, tip)
+        if not locked:
+            # set_locked(False) re-enables all tiles; restore the check_dom tile's own state.
+            self._sync_check_dom_tile()
 
     def _on_stack_changed(self, index):
         if self._raw_mode and self.stackedWidget.currentWidget() is not self._main_widget:
             self._show_table_view()
 
-        widget = self.stackedWidget.currentWidget()
-        if widget is not None:
-            visible_key = self._page_route_map.get(widget.objectName(), widget.objectName())
-            self.navigationInterface.setCurrentItem(visible_key)
+        self._sync_rail()
 
+        widget = self.stackedWidget.currentWidget()
         if widget is not self._main_widget and hasattr(self, "_search_edit") and self._search_edit.text():
             self._search_edit.clear()
 
@@ -1263,12 +1226,6 @@ class HostsEditor(FluentWindow):
         self._refresh_toolbar_status_ui = _refresh_toolbar_status_ui
         self._clear_hov = _clear_hov
 
-        def _resync_hov_after_nav_change(_mode=None):
-            hov_content.update()
-            hov_frame.update()
-
-        self.navigationInterface.displayModeChanged.connect(_resync_hov_after_nav_change)
-
         self._hov_filters: list = []
 
         def _hook(btn, icon, label):
@@ -1292,8 +1249,9 @@ class HostsEditor(FluentWindow):
             self._hov_filters.append(f)
 
         def _tb(icon, color, label_key, slot):
-            b = HOTSButton(icon, color, "")
-            b.setFixedWidth(44)
+            b = HOTSButton(icon, color, "", icon_size=22, radius=10, h_margins=(12, 12))
+            b.setFixedWidth(46)
+            b.setFixedHeight(46)
             b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             b.clicked.connect(slot)
             _hook(b, icon, T(label_key))
@@ -1305,8 +1263,9 @@ class HostsEditor(FluentWindow):
         btn_delete  = _tb(FIF.DELETE,  DARK['accent'], "btn_delete",  self._delete)
         btn_backups = _tb(FIF.HISTORY, DARK['accent'], "btn_backups", self._backups)
 
-        self._save_btn = HOTSButton(FIF.SAVE, DARK['accent'], "")
-        self._save_btn.setFixedWidth(44)
+        self._save_btn = HOTSButton(FIF.SAVE, DARK['accent'], "", icon_size=22, radius=10, h_margins=(12, 12))
+        self._save_btn.setFixedWidth(46)
+        self._save_btn.setFixedHeight(46)
         self._save_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._save_btn.clicked.connect(self._save)
         _hook(self._save_btn, FIF.SAVE, T("btn_save"))
@@ -1374,6 +1333,7 @@ class HostsEditor(FluentWindow):
         self.table.setModel(self._table_model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.selectionModel().selectionChanged.connect(self._on_table_selection_changed)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(False)
@@ -1396,7 +1356,6 @@ class HostsEditor(FluentWindow):
             f"border-bottom: 1px solid {accent_rgba(0.12)}; color: {DARK['fg']}; }}"
             f"QTableView::item:selected:active {{ background-color: {accent_rgba(0.10)}; }}"
             f"QTableView::item:selected:!active {{ background-color: {accent_rgba(0.07)}; }}"
-            f"QTableView::item:focus {{ outline: 0; border: none; background-color: {accent_rgba(0.10)}; }}"
             f"QHeaderView::section {{ background-color: {DARK['header_bg']}; color: {DARK['fg2']}; "
             f"border: none; border-right: 1px solid {DARK['border_strong']}; border-bottom: 1px solid {DARK['border_soft']}; padding: 4px 8px; "
             f"font-family: 'Segoe UI'; font-size: 11pt; font-weight: normal; }}"
@@ -1433,6 +1392,8 @@ class HostsEditor(FluentWindow):
         self.table.setColumnWidth(1, max(_saved_widths[1], self._MIN_COL_WIDTHS[1]))
         self.table.setColumnWidth(2, max(_saved_widths[2], self._MIN_COL_WIDTHS[2]))
         self.table.verticalHeader().setDefaultSectionSize(40)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        SmoothWheel(self.table, step_px=40)
 
         self.table.setItemDelegate(_NoFocusDelegate(self.table))
         self.table.horizontalHeader().sectionClicked.connect(self._sort_col)
@@ -1532,7 +1493,7 @@ class HostsEditor(FluentWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        from qfluentwidgets import IconWidget as _IconWidget
+        from .ui_parts import IconWidget as _IconWidget
 
         hdr_row = QHBoxLayout()
         hdr_row.setSpacing(10)
@@ -1560,6 +1521,7 @@ class HostsEditor(FluentWindow):
 
         self._raw_editor = QTextEdit()
         self._raw_editor.setFont(QFont("Consolas", 11))
+        SmoothWheel(self._raw_editor)
         self._raw_editor.setStyleSheet(
             f"QTextEdit {{ background-color: {DARK['table_bg']}; color: {DARK['fg']}; "
             f"border: 1px solid {DARK['border_soft']}; border-radius: 6px; "
@@ -1717,7 +1679,7 @@ class HostsEditor(FluentWindow):
         sf_lay.setContentsMargins(10, 0, 8, 0)
         sf_lay.setSpacing(6)
 
-        from qfluentwidgets import IconWidget as _IconWidget
+        from .ui_parts import IconWidget as _IconWidget
         lupa = _IconWidget(FIF.SEARCH)
         lupa.setFixedSize(16, 16)
         lupa.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -1819,6 +1781,10 @@ class HostsEditor(FluentWindow):
         else:
             self._search_count.setText("")
 
+        # A model reset clears the selection without emitting selectionChanged,
+        # so sync the check_dom tile manually.
+        self._sync_check_dom_tile()
+
     def _update_status(self):
         real = [e for e in self.entries if e["enabled"] is not None]
         on   = sum(1 for e in real if e["enabled"])
@@ -1887,6 +1853,23 @@ class HostsEditor(FluentWindow):
                     result.append(idx)
         return result
 
+    def _on_table_selection_changed(self, *_args):
+        # Deferred by one event-loop cycle: clicking the check_dom tile clears the table
+        # selection while switching pages. Evaluating immediately would disable the tile
+        # itself and move keyboard focus to the neighbouring tile.
+        QTimer.singleShot(0, self._sync_check_dom_tile)
+
+    def _sync_check_dom_tile(self, *_args):
+        """Enabled only with a table selection, or while its own page is open."""
+        tile = self._rail.tile("check_dom")
+        if tile is None:
+            return
+        has_selection = bool(self._selected_indices())
+        is_current = self._rail.current() == "check_dom"
+        enabled = has_selection or is_current
+        tile.setEnabled(enabled)
+        tile.set_tip(tile.default_tip if enabled else T("no_sel_check"))
+
     def _selected_idx(self) -> int | None:
         indices = self._selected_indices()
         return indices[0] if indices else None
@@ -1895,12 +1878,14 @@ class HostsEditor(FluentWindow):
         if not self._dirty:
             self._dirty = True
             self._save_btn.set_accent(True)
+            self._rail.set_tile_attention("home", True)
 
     def _mark_clean(self):
         self._saved_text = entries_to_text(self.entries)
         if self._dirty:
             self._dirty = False
             self._save_btn.set_accent(False)
+            self._rail.set_tile_attention("home", False)
 
     def _mark_dirty_if_changed(self):
         if entries_to_text(self.entries) == self._saved_text:
@@ -2043,12 +2028,11 @@ class HostsEditor(FluentWindow):
             return
         self._mark_clean()
         self._update_status()
-        InfoBar.success(
+        InfoBanner.success(
             title=T("save_success_title"),
             content=T("save_success_msg"),
             orient=Qt.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP,
+            closable=True,
             duration=3000,
             parent=self,
         )
@@ -2186,6 +2170,7 @@ class HostsEditor(FluentWindow):
             self._table_widget.show()
             self._toolbar_frame.show()
             self._main_gold_line.show()
+            self._table_top_gap.show()
             self._refresh_table()
             self._update_status()
 
@@ -2195,6 +2180,7 @@ class HostsEditor(FluentWindow):
         self._table_widget.hide()
         self._toolbar_frame.hide()
         self._main_gold_line.hide()
+        self._table_top_gap.hide()
         self._raw_widget.show()
         self._raw_mode = True
         self._populate_raw_view()
@@ -2342,6 +2328,7 @@ class HostsEditor(FluentWindow):
             self._table_widget.show()
             self._toolbar_frame.show()
             self._main_gold_line.show()
+            self._table_top_gap.show()
         self._load()
         self.switchTo(self._main_widget)
         self._show_table_view()
@@ -2383,10 +2370,16 @@ class HostsEditor(FluentWindow):
         self._refresh_table(); self._update_status(); self._mark_dirty_if_changed()
 
     def _open_parental_control(self):
-        self.switchTo(self._parental_page)
+        try:
+            self._parental_page.refresh_content()
+        finally:
+            self.switchTo(self._parental_page)
 
     def _open_privacy(self):
-        self.switchTo(self._privacy_page)
+        try:
+            self._privacy_page.refresh_content()
+        finally:
+            self.switchTo(self._privacy_page)
 
     def _support(self):
         self.switchTo(self._support_page)
@@ -2405,7 +2398,7 @@ class HostsEditor(FluentWindow):
 
     def _change_accent_color(self):
         from .dialogs import AccentColorDialog
-        current_accent = self._settings.get("accent_color", "gold")
+        current_accent = self._settings.get("accent_color", DEFAULT_ACCENT)
         current_theme = self._settings.get("theme", "dark")
         current_table_text_accent = bool(self._settings.get("table_text_accent", False))
         dlg = AccentColorDialog(self, current_accent=current_accent, current_theme=current_theme,
@@ -2499,20 +2492,9 @@ class HostsEditor(FluentWindow):
 
         def on_save(new_hash: str):
             _reg_set_password(new_hash)
-            self._refresh_pass_nav()
 
         dlg = SetPasswordDialog(self, current_hash, on_save)
         dlg.exec()
-
-    def _refresh_pass_nav(self):
-        from .__main__ import _reg_get_password
-        has = bool(_reg_get_password())
-        try:
-            item = self.navigationInterface.widget("password")
-            if item:
-                attach_fluent_tip(item, T("opt_pass_on") if has else T("opt_pass_off"))
-        except Exception:
-            pass
 
     def _disconnect_bg_signals(self):
         for sig in self._bg_signal_objs:
@@ -2553,16 +2535,16 @@ class HostsEditor(FluentWindow):
 
         self._disconnect_bg_signals()
         geo = self.geometry()
+        if self.isFullScreen() or self.isMaximized() or self.isFullscreenMode():
+            normal = self.normalGeometry()
+            if normal.isValid() and not normal.isNull():
+                geo = normal
         col_widths = ",".join(str(self.table.columnWidth(i)) for i in range(3))
-        nav_expanded = self.navigationInterface.panel.displayMode in (
-            NavigationDisplayMode.EXPAND, NavigationDisplayMode.MENU
-        )
         self._save_settings_merged(
             geometry=f"{geo.width()}x{geo.height()}+{geo.x()}+{geo.y()}",
             language=current_lang(),
             table_col_widths=col_widths,
             table_sort_col=self._sort_col_active,
             table_sort_reverse="1" if self._sort_col_reverse else "0",
-            nav_expanded="1" if nav_expanded else "0",
         )
         event.accept()

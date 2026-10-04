@@ -1,15 +1,14 @@
 import os
 import webbrowser
 
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QGridLayout, QCheckBox
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QGridLayout, QSizePolicy
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
 
-from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import IconWidget
-
+from ..icons import FIF
+from ..ui_parts import IconWidget
 from ..constants import DARK, load_settings, save_settings
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, colored_svg_icon
+from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, HOTSSwitch, colored_svg_icon
 from ..i18n import T
 from ..bg_tasks import register_qthread, is_shutting_down
 
@@ -34,8 +33,9 @@ class AboutPage(HOTSPage):
         top.setStyleSheet(
             f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
         )
+        top.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         top_outer_lay = QVBoxLayout(top)
-        top_outer_lay.setContentsMargins(20, 18, 20, 14)
+        top_outer_lay.setContentsMargins(20, 17, 20, 14)
         top_outer_lay.setSpacing(8)
 
         top_lay = QHBoxLayout()
@@ -44,7 +44,7 @@ class AboutPage(HOTSPage):
 
         logo_lbl = QLabel()
         logo_lbl.setStyleSheet("background: transparent; border: none;")
-        logo_path = self._find_asset("logo.png")
+        logo_path = self._find_asset("graphic/logo.png")
         if logo_path:
             pix = QPixmap(logo_path)
             if not pix.isNull():
@@ -73,30 +73,31 @@ class AboutPage(HOTSPage):
         self._website_btn = HOTSButton(FIF.GLOBE, "#60c8ff", T("about_website_btn"))
         self._website_btn.fit_to_content()
         self._website_btn.clicked.connect(lambda: webbrowser.open("https://hotstools.com"))
-        top_lay.addWidget(self._website_btn, 0, Qt.AlignVCenter)
+        right_w = QWidget()
+        right_w.setFixedHeight(126)
+        right_w.setStyleSheet("background: transparent; border: none;")
+        right_col = QVBoxLayout(right_w)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.setSpacing(0)
+        right_col.addStretch(1)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(16)
+        btn_row.addWidget(self._website_btn)
 
         self._update_btn = HOTSButton(FIF.SYNC, "#60c8ff", T("about_check_update"))
         self._update_btn.fit_to_content()
         self._update_btn.clicked.connect(self._check_for_updates)
-        top_lay.addWidget(self._update_btn, 0, Qt.AlignVCenter)
-
-        cb_row = QHBoxLayout()
-        cb_row.addStretch()
+        btn_row.addWidget(self._update_btn)
+        right_col.addLayout(btn_row)
+        right_col.addStretch(1)
 
         startup_checked = str(load_settings().get("check_updates_on_startup", "1")).strip().lower() in ("1", "true", "yes")
-        self._update_startup_cb = QCheckBox(T("about_check_update_startup"))
+        self._update_startup_cb = HOTSSwitch(T("about_check_update_startup"), font_pt=8, color=DARK['fg2'], spacing=8)
         self._update_startup_cb.setChecked(startup_checked)
         self._update_startup_cb.setFocusPolicy(Qt.NoFocus)
-        self._update_startup_cb.setStyleSheet(
-            f"QCheckBox {{ color: {DARK['fg2']}; background: transparent; spacing: 8px; font-size: 8pt; padding: 0px; outline: none; border: none; }}\n"
-            f"QCheckBox:focus {{ outline: none; border: none; }}\n"
-            f"QCheckBox::indicator {{ width: 13px; height: 13px; border: 1px solid {DARK['border']}; border-radius: 3px; background: {DARK['indicator_bg']}; }}\n"
-            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-            f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
-        )
         self._update_startup_cb.toggled.connect(self._on_check_update_startup_toggled)
-        cb_row.addWidget(self._update_startup_cb)
-        top_outer_lay.addLayout(cb_row)
+        right_col.addWidget(self._update_startup_cb, 0, Qt.AlignRight)
+        top_lay.addWidget(right_w)
 
         cl.addWidget(top)
         cl.addSpacing(6)

@@ -5,8 +5,7 @@ from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushBut
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPixmap, QPainter, QIcon
 
-from qfluentwidgets import FluentIcon as FIF
-
+from ..icons import FIF
 from ..constants import DARK, IS_LIGHT_THEME
 from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton
 from ..i18n import T
@@ -50,7 +49,7 @@ class SupportPage(HOTSPage):
         card_row = QHBoxLayout()
         card_row.setSpacing(12)
 
-        kofi_btn = self._make_image_button("support_me_on_kofi_dark.png", height=42, on_click=self._open_kofi)
+        kofi_btn = self._make_image_button("graphic/support_me_on_kofi_dark.png", height=42, on_click=self._open_kofi)
         kofi_already_wired = kofi_btn is not None
         if kofi_btn is None:
             kofi_btn = HOTSButton(FIF.HEART, "#29abe0", T("sup_btn_kofi"))
@@ -61,7 +60,7 @@ class SupportPage(HOTSPage):
         )
         card_row.addWidget(kofi_card, 1)
 
-        pay_btn = self._make_image_button("paypal_donate_button.png", height=32, on_click=self._open_paypal)
+        pay_btn = self._make_image_button("graphic/paypal_donate_button.png", height=32, on_click=self._open_paypal)
         pay_already_wired = pay_btn is not None
         if pay_btn is None:
             pay_btn = HOTSButton(FIF.HEART, "#0070ba", T("sup_btn_support"))
@@ -127,7 +126,7 @@ class SupportPage(HOTSPage):
 
     def _setup_watermark(self):
         try:
-            path = self._find_asset("logoS.png")
+            path = self._find_asset("graphic/logoS.png")
             if not path:
                 return
             pix, logical_size = self._make_watermark_pixmap(path, height=25, opacity=0.15)

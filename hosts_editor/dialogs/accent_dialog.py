@@ -1,11 +1,11 @@
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QButtonGroup, QPushButton, QRadioButton, QCheckBox
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QButtonGroup, QPushButton, QRadioButton
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from qfluentwidgets import FluentIcon as FIF, IconWidget
-
-from ..constants import DARK, ACCENT_PRESETS_DARK, ACCENT_PRESETS_LIGHT, hex_to_rgb
-from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, colored_svg_icon
+from ..icons import FIF
+from ..ui_parts import IconWidget
+from ..constants import DARK, DEFAULT_ACCENT, ACCENT_PRESETS_DARK, ACCENT_PRESETS_LIGHT, hex_to_rgb
+from ..widgets_qt import HOTSDialog, HOTSButton, HOTSSwitch, h_separator, colored_svg_icon, HOTSRadio
 from ..i18n import T
 
 
@@ -45,9 +45,10 @@ class AccentColorDialog(HOTSDialog):
         "red":   "acc_red",
         "green": "acc_green",
         "blue":  "acc_blue",
+        "teal":  "acc_teal",
     }
 
-    def __init__(self, parent=None, current_accent: str = "gold", current_theme: str = "dark",
+    def __init__(self, parent=None, current_accent: str = DEFAULT_ACCENT, current_theme: str = "dark",
                  current_table_text_accent: bool = False):
         super().__init__(parent, T("app_title"), min_width=380, min_height=300)
         self.chosen_accent = None
@@ -110,14 +111,8 @@ class AccentColorDialog(HOTSDialog):
         self._rebuild_swatches(self._current_theme, keep_selection=True)
 
         cl.addSpacing(4)
-        self._table_text_cb = QCheckBox(T("acc_table_text_accent"))
+        self._table_text_cb = HOTSSwitch(T("acc_table_text_accent"), font_pt=9, spacing=10)
         self._table_text_cb.setChecked(self._current_table_text_accent)
-        self._table_text_cb.setStyleSheet(
-            f"QCheckBox {{ color: {DARK['fg']}; background: transparent; spacing: 10px; font-size: 9pt; padding: 2px 0px; }}\n"
-            f"QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
-            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-            f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
-        )
         cl.addWidget(self._table_text_cb)
 
         cl.addStretch()
@@ -218,15 +213,9 @@ class AccentColorDialog(HOTSDialog):
             accent_hex = preset["accent"]
             r, g, b = hex_to_rgb(accent_hex)
 
-            dot = QRadioButton()
+            dot = HOTSRadio(accent=QColor(r, g, b))
             dot.setCursor(Qt.PointingHandCursor)
-            dot.setStyleSheet(
-                f"QRadioButton {{ background: transparent; }}"
-                f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; "
-                f"border-radius: 4px; background: {DARK['indicator_bg']}; }}"
-                f"QRadioButton::indicator:hover {{ border: 1px solid rgb({r},{g},{b}); }}"
-                f"QRadioButton::indicator:checked {{ background: rgb({r},{g},{b}); border: 1px solid rgb({r},{g},{b}); }}"
-            )
+            dot.setFixedSize(16, 16)
             dot.setChecked(key == selected)
 
             row = _AccentRow(dot, (r, g, b))
@@ -237,7 +226,7 @@ class AccentColorDialog(HOTSDialog):
             swatch = QLabel()
             swatch.setFixedSize(18, 18)
             swatch.setStyleSheet(
-                f"background-color: {accent_hex}; border-radius: 5px; "
+                f"background-color: {accent_hex}; border-radius: 9px; "
                 f"border: 1px solid {DARK['border_soft2']};"
             )
             swatch.setAttribute(Qt.WA_TransparentForMouseEvents)

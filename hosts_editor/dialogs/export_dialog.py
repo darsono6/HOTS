@@ -1,10 +1,8 @@
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, QCheckBox, QButtonGroup
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QButtonGroup
 
-from qfluentwidgets import FluentIcon as FIF
-
+from ..icons import FIF
 from ..constants import DARK
-from ..widgets_qt import HOTSDialog, HOTSButton, h_separator
+from ..widgets_qt import HOTSDialog, HOTSButton, HOTSSwitch, HOTSRadio, h_separator
 from ..i18n import T
 
 
@@ -30,24 +28,16 @@ class ExportOptionsDialog(HOTSDialog):
         scope_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 10pt; font-weight: bold; background: transparent;")
         cl.addWidget(scope_lbl)
 
-        _rb_style = (
-            f"QRadioButton {{ color: {DARK['fg']}; background: transparent; spacing: 12px; font-size: 10pt; padding: 2px 0px; }}\n"
-            f"QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
-            f"QRadioButton::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-            f"QRadioButton::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
-        )
 
         self._rb_group = QButtonGroup(self)
 
-        self._rb_all = QRadioButton(T("export_scope_all", n=self._total))
-        self._rb_all.setStyleSheet(_rb_style)
+        self._rb_all = HOTSRadio(T("export_scope_all", n=self._total))
         self._rb_all.setChecked(not self._has_sel)
         self._rb_group.addButton(self._rb_all)
         cl.addWidget(self._rb_all)
 
         sel_text = T("export_scope_sel", n=len(self.sel_indices)) if self._has_sel else T("export_scope_sel_none")
-        self._rb_sel = QRadioButton(sel_text)
-        self._rb_sel.setStyleSheet(_rb_style)
+        self._rb_sel = HOTSRadio(sel_text)
         self._rb_sel.setEnabled(self._has_sel)
         self._rb_sel.setChecked(self._has_sel)
         self._rb_group.addButton(self._rb_sel)
@@ -59,14 +49,8 @@ class ExportOptionsDialog(HOTSDialog):
         comm_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 10pt; font-weight: bold; background: transparent;")
         cl.addWidget(comm_lbl)
 
-        self._cb_comments = QCheckBox(T("export_comments_include"))
+        self._cb_comments = HOTSSwitch(T("export_comments_include"))
         self._cb_comments.setChecked(True)
-        self._cb_comments.setStyleSheet(
-            f"QCheckBox {{ color: {DARK['fg']}; background: transparent; spacing: 12px; font-size: 10pt; padding: 2px 0px; }}\n"
-            f"QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {DARK['border']}; border-radius: 4px; background: {DARK['indicator_bg']}; }}\n"
-            f"QCheckBox::indicator:hover {{ border: 1px solid {DARK['accent']}; }}\n"
-            f"QCheckBox::indicator:checked {{ background: {DARK['accent']}; border: 1px solid {DARK['accent']}; }}"
-        )
         cl.addWidget(self._cb_comments)
         
         cl.addStretch()

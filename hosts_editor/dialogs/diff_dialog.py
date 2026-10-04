@@ -4,8 +4,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QLabel, QWidget, QPlainT
 from PySide6.QtGui import QTextCharFormat, QColor, QFont, QSyntaxHighlighter
 from PySide6.QtCore import Qt
 
-from qfluentwidgets import FluentIcon as FIF
-
+from ..icons import FIF
 from ..constants import DARK, accent_rgba
 from ..widgets_qt import HOTSDialog, HOTSButton, HOTSContextMenu
 from ..i18n import T
