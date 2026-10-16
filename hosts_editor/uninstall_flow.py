@@ -172,7 +172,7 @@ def _remove_registry_keys() -> None:
 
 
 def apply_uninstall_choices(choices: dict) -> dict:
-    """Run the uninstall cleanup. `choices` comes from the wizard (empty if it was cancelled):
+    """Run the uninstall cleanup. `choices` comes from the wizard (empty if there is no wizard result):
         remove_hosts_entries, restore_privacy, delete_data, delete_hosts_backups, delete_custom_domains.
 
     The mandatory steps (hosts ACL, IFEO/file locks, registry keys) always run. Returns a report

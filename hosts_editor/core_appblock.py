@@ -11,6 +11,7 @@ from typing import Optional
 from .core_antispy import (
     _resolve_powershell_exe, _console_encoding, CREATE_NO_WINDOW,
 )
+from .secure_storage import PROGRAMDATA_DIR, atomic_write_json
 
 IFEO_ROOT = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
 
@@ -18,9 +19,8 @@ BLOCK_DEBUGGER_CMD = r"C:\Windows\System32\__hots_blocked__.exe"
 
 _FILE_LOCK_SID = "S-1-5-32-545"
 
-STATE_FILE = os.path.join(
-    os.environ.get("APPDATA", ""), "HOTS Hosts", "appblock_state.json"
-)
+STATE_FILE = os.path.join(PROGRAMDATA_DIR, "appblock_state.json")
+_LEGACY_STATE_FILE = os.path.join(os.environ.get("APPDATA", ""), "HOTS Hosts", "appblock_state.json")
 
 _UNINSTALL_ROOTS = [
     (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
@@ -354,23 +354,51 @@ class AppBlockManager:
             return None
 
     @staticmethod
+    def _clean_state(raw) -> list:
+        # These entries drive registry and ACL changes made as administrator, so only well-formed ones are used.
+        if not isinstance(raw, list):
+            return []
+        apps = []
+        for item in raw:
+            try:
+                exe = item["exe_name"]
+                if (not isinstance(exe, str) or not exe.lower().endswith(".exe") or exe != os.path.basename(exe)
+                        or exe.lower() in PROTECTED_SYSTEM_EXES or exe.lower() == OWN_EXE_NAME):
+                    continue
+                locked = item.get("locked_path", "")
+                if not isinstance(locked, str) or (locked and (
+                        not os.path.isabs(locked) or os.path.basename(locked).lower() != exe.lower())):
+                    locked = ""
+                apps.append(BlockedApp(exe, str(item.get("display_name", "")), str(item.get("category", "custom")),
+                                       locked, bool(item.get("enabled", True)),
+                                       float(item.get("added_at", time.time()))))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+        return apps
+
+    @staticmethod
     def _load_state() -> list:
-        if not os.path.exists(STATE_FILE):
-            return []
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            return [BlockedApp(**item) for item in raw]
-        except Exception:
-            return []
+        # Older versions kept the list in the user's profile; it is validated and moved once.
+        for path in (STATE_FILE, _LEGACY_STATE_FILE):
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    apps = AppBlockManager._clean_state(json.load(f))
+            except Exception:
+                apps = []
+            if path == _LEGACY_STATE_FILE and apps:
+                try:
+                    AppBlockManager._save_state(apps)
+                    os.remove(path)
+                except Exception:
+                    pass
+            return apps
+        return []
 
     @staticmethod
     def _save_state(apps: list) -> None:
-        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-        tmp = STATE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump([asdict(a) for a in apps], f, indent=2, ensure_ascii=False)
-        os.replace(tmp, STATE_FILE)
+        atomic_write_json(STATE_FILE, [asdict(a) for a in apps])
 
     @classmethod
     def list_blocked(cls) -> list:

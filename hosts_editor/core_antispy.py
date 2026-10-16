@@ -3,7 +3,6 @@ import functools
 import json
 import logging
 import os
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -11,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .constants import HOSTS_PATH
 from .i18n import T
+from .secure_storage import ensure_dir
 
 import winreg
 
@@ -183,9 +183,11 @@ _PS_MISSING = "__ps_missing__"
 _ps_exe_cache: Optional[str] = None
 _ps_exe_resolved = False
 
+_ps_fail_logged = False
+
 def _resolve_powershell_exe() -> Optional[str]:
-    global _ps_exe_cache, _ps_exe_resolved
-    if _ps_exe_resolved:
+    global _ps_exe_cache, _ps_exe_resolved, _ps_fail_logged
+    if _ps_exe_resolved and _ps_exe_cache is not None:
         return _ps_exe_cache
 
     _ps_exe_resolved = True
@@ -212,13 +214,16 @@ def _resolve_powershell_exe() -> Optional[str]:
         _ps_exe_cache = candidate
         return _ps_exe_cache
 
-    which_candidate = shutil.which("powershell") or shutil.which("pwsh")
-    if which_candidate:
-        logger.warning("powershell.exe/pwsh.exe not at default paths — found via PATH: %s", which_candidate)
-        _ps_exe_cache = which_candidate
-        return _ps_exe_cache
-
-    logger.error("No PowerShell interpreter found (neither powershell.exe nor pwsh.exe).")
+    if not _ps_fail_logged:
+        _ps_fail_logged = True
+        logger.error(
+            "No PowerShell interpreter found. checked=%r exists=%s dir_exists=%s SystemRoot=%r "
+            "ProgramFiles=%r PATH=%r",
+            POWERSHELL_EXE, os.path.isfile(POWERSHELL_EXE),
+            os.path.isdir(os.path.dirname(POWERSHELL_EXE)),
+            os.environ.get("SystemRoot"), os.environ.get("ProgramFiles"),
+            os.environ.get("PATH", "")[:300],
+        )
     _ps_exe_cache = None
     return _ps_exe_cache
 
@@ -257,7 +262,7 @@ def _console_encoding() -> str:
 
 def _atomic_write_json(path: str, data: dict) -> None:
     directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
+    ensure_dir(directory)
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".antispy_", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -568,7 +573,7 @@ class AntiSpyManager:
                 if state == _PS_MISSING:
                     if not AntiSpyManager.last_error:
                         AntiSpyManager.last_error = T("antispy_err_ps_missing_task", task=item['task_name'])
-                    logger.error("enable_item(%s): brak interpretera PowerShell", item_id)
+                    logger.error("enable_item(%s): no PowerShell interpreter", item_id)
                     return False
                 if state is None:
                     AntiSpyManager._warn(T("antispy_warn_task_missing", task=item['task_name']))
@@ -1190,8 +1195,8 @@ class HostsLockManager:
                 return False
             exe = _resolve_powershell_exe()
             if exe is None:
-                HostsLockManager.last_error = T("antispy_err_no_admin")
-                logger.error("HostsLockManager.enable: brak interpretera PowerShell")
+                HostsLockManager.last_error = "PowerShell not found"
+                logger.error("HostsLockManager.enable: no PowerShell interpreter")
                 return False
             safe_path = hosts_path.replace("'", "''")
 
@@ -1232,8 +1237,8 @@ class HostsLockManager:
                 return False
             exe = _resolve_powershell_exe()
             if exe is None:
-                HostsLockManager.last_error = T("antispy_err_no_admin")
-                logger.error("HostsLockManager.disable: brak interpretera PowerShell")
+                HostsLockManager.last_error = "PowerShell not found"
+                logger.error("HostsLockManager.disable: no PowerShell interpreter")
                 return False
             safe_path = hosts_path.replace("'", "''")
             ps_command = (

@@ -144,25 +144,28 @@ def _parse_line(raw_line: str) -> dict:
     return {"enabled": True, "ip": ip, "hostname": hostname,
             "comment": comment, "raw": raw_line}
 
+def _decode_hosts_bytes(raw: bytes) -> str:
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            return raw.decode("cp1250")
+        except UnicodeDecodeError:
+            return raw.decode("utf-8", errors="replace")
+
+def _read_hosts_text(path) -> str:
+    with open(path, "rb") as f:
+        raw = f.read()
+    return _decode_hosts_bytes(raw).replace("\r\n", "\n").replace("\r", "\n")
+
 def _read_text_smart(path) -> list:
     with open(path, "rb") as f:
         raw = f.read()
-
-    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
-        text = raw.decode("utf-16", errors="replace")
-    elif raw.startswith(b"\xef\xbb\xbf"):
-        text = raw.decode("utf-8-sig", errors="replace")
-    else:
-
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            try:
-                text = raw.decode("cp1250")
-            except UnicodeDecodeError:
-                text = raw.decode("utf-8", errors="replace")
-
-    return text.splitlines()
+    return _decode_hosts_bytes(raw).splitlines()
 
 def parse_hosts(path) -> list:
     entries = []
@@ -258,6 +261,49 @@ def create_backup(path) -> str | None:
     _rotate_backups(path)
     return bak_path
 
+def _is_managed_entry(line: str) -> bool:
+    e = _parse_line(line.rstrip("\r\n"))
+    return e["enabled"] is True and e["ip"] == "0.0.0.0"
+
+def _parental_block_indices(lines: list, start_tag: str, end_tag: str) -> set:
+    """Indices of the lines that belong to a block (markers + entries).
+    A damaged block is recognised too: with END missing, the run of 0.0.0.0 entries right
+    below START counts; with START missing, the run right above END."""
+    idx = set()
+    n = len(lines)
+    inside = False
+    for i, line in enumerate(lines):
+        if start_tag in line:
+            idx.add(i)
+            if any(end_tag in later for later in lines[i + 1:]):
+                inside = True
+            else:
+                j = i + 1
+                while j < n and _is_managed_entry(lines[j]):
+                    idx.add(j)
+                    j += 1
+        elif end_tag in line:
+            idx.add(i)
+            if not inside:
+                j = i - 1
+                while j >= 0 and _is_managed_entry(lines[j]):
+                    idx.add(j)
+                    j -= 1
+            inside = False
+        elif inside:
+            idx.add(i)
+    return idx
+
+_PARENTAL_START_KEY_RE = re.compile(r"# === HOSTS_EDITOR_PARENTAL_(.+?)_START ===")
+_PARENTAL_END_KEY_RE = re.compile(r"# === HOSTS_EDITOR_PARENTAL_(.+?)_END ===")
+
+def parental_broken_keys(text: str) -> set:
+    starts = _PARENTAL_START_KEY_RE.findall(text)
+    ends = _PARENTAL_END_KEY_RE.findall(text)
+    return {k for k in set(starts) | set(ends) if starts.count(k) != ends.count(k)}
+
+_PARENTAL_TAG_KEY_RE = re.compile(r"# === HOSTS_EDITOR_PARENTAL_(.+?)_(?:START|END) ===")
+
 _PARENTAL_BLOCK_RE = re.compile(
     r"^# === HOSTS_EDITOR_PARENTAL_(?P<key>.+?)_START ===[ \t]*\r?\n"
     r".*?"
@@ -272,10 +318,16 @@ def strip_all_parental_blocks(path=HOSTS_PATH) -> bool:
         return True
     with _HOSTS_FILE_LOCK:
         _wait_for_write_gap()
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
+        content = _read_hosts_text(path)
 
-        new_content = _PARENTAL_BLOCK_RE.sub("", content)
+        lines = content.splitlines(keepends=True)
+        drop = set()
+        for key in set(_PARENTAL_TAG_KEY_RE.findall(content)):
+            drop |= _parental_block_indices(
+                lines,
+                f"# === HOSTS_EDITOR_PARENTAL_{key}_START ===",
+                f"# === HOSTS_EDITOR_PARENTAL_{key}_END ===")
+        new_content = "".join(l for i, l in enumerate(lines) if i not in drop)
         if new_content == content:
             return True
 
@@ -307,6 +359,8 @@ def strip_all_parental_blocks(path=HOSTS_PATH) -> bool:
 def restore_from_backup(path, backup_path) -> None:
     if HostsLockManager.is_active():
         raise HostsLockError(T("hosts_lock_blocks_write"))
+    with open(backup_path, "rb") as f:
+        data = f.read()
     with _HOSTS_FILE_LOCK:
         _wait_for_write_gap()
         try:
@@ -322,7 +376,8 @@ def restore_from_backup(path, backup_path) -> None:
                         os.chmod(path, stat.S_IWRITE)
                     except OSError:
                         pass
-                shutil.copy2(str(backup_path), path)
+                with open(path, "wb") as f:
+                    f.write(data)
                 last_err = None
                 break
             except PermissionError as ex:
@@ -539,14 +594,21 @@ def _parental_tags(tag_suffix: str):
         f"# === HOSTS_EDITOR_PARENTAL_{key}_END ===",
     )
 
+def _parental_block_active(content: str, start_tag: str, end_tag: str) -> bool:
+    lines = content.splitlines(keepends=True)
+    for i in _parental_block_indices(lines, start_tag, end_tag):
+        ln = lines[i].strip()
+        if ln and not ln.startswith("#"):
+            return True
+    return False
+
 def is_parental_active(tag_suffix: str = "xxx.txt") -> bool:
     if not os.path.exists(HOSTS_PATH):
         return False
     start_tag, end_tag = _parental_tags(tag_suffix)
     try:
-        with open(HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        return start_tag in content and end_tag in content
+        content = _read_hosts_text(HOSTS_PATH)
+        return _parental_block_active(content, start_tag, end_tag)
     except Exception:
         return False
 
@@ -556,14 +618,33 @@ def get_parental_active_map(tag_suffixes) -> dict:
     if not os.path.exists(HOSTS_PATH):
         return result
     try:
-        with open(HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
+        content = _read_hosts_text(HOSTS_PATH)
     except Exception:
         return result
     for suffix in tag_suffixes:
         start_tag, end_tag = _parental_tags(suffix)
-        result[suffix] = start_tag in content and end_tag in content
+        result[suffix] = _parental_block_active(content, start_tag, end_tag)
     return result
+
+def _strip_unmarked_entries(lines: list, domains: set) -> list:
+    """Remove 0.0.0.0 entries of the given domains that lie OUTSIDE any parental block
+    (e.g. after the markers were deleted by hand). Entries inside blocks are left alone."""
+    keys = set(_PARENTAL_TAG_KEY_RE.findall("".join(lines)))
+    protected = set()
+    for key in keys:
+        protected |= _parental_block_indices(
+            lines,
+            f"# === HOSTS_EDITOR_PARENTAL_{key}_START ===",
+            f"# === HOSTS_EDITOR_PARENTAL_{key}_END ===")
+    out = []
+    for i, line in enumerate(lines):
+        if i not in protected:
+            e = _parse_line(line.rstrip("\r\n"))
+            if e["enabled"] is True and e["ip"] == "0.0.0.0" and e["hostname"].lower() in domains:
+                continue
+        out.append(line)
+    return out
+
 
 def toggle_parental_control(enable: bool, list_path: str = None,
                              tag_suffix: str = "xxx.txt",
@@ -582,8 +663,7 @@ def toggle_parental_control(enable: bool, list_path: str = None,
             read_err = None
             for attempt in range(15):
                 try:
-                    with open(HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f:
-                        lines = f.readlines()
+                    lines = _read_hosts_text(HOSTS_PATH).splitlines(keepends=True)
                     read_err = None
                     break
                 except PermissionError as ex:
@@ -592,17 +672,8 @@ def toggle_parental_control(enable: bool, list_path: str = None,
             if read_err is not None:
                 raise HostsBusyError(T("hosts_busy_msg"))
 
-            new_lines = []
-            inside = False
-            for line in lines:
-                if start_tag in line:
-                    inside = True
-                    continue
-                if end_tag in line:
-                    inside = False
-                    continue
-                if not inside:
-                    new_lines.append(line)
+            drop = _parental_block_indices(lines, start_tag, end_tag)
+            new_lines = [line for i, line in enumerate(lines) if i not in drop]
 
             if enable and list_path and os.path.exists(list_path):
                 blocked = set()
@@ -617,6 +688,7 @@ def toggle_parental_control(enable: bool, list_path: str = None,
                             blocked.add(domain)
 
                 if blocked:
+                    new_lines = _strip_unmarked_entries(new_lines, blocked)
                     block_lines = [f"{start_tag}\n"]
                     for domain in sorted(blocked):
                         block_lines.append(_format_entry_line("0.0.0.0", domain, comment) + "\n")

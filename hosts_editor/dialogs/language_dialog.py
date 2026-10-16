@@ -18,7 +18,7 @@ class LanguageDialog(HOTSDialog):
         cl.setContentsMargins(28, 24, 28, 16)
         cl.setSpacing(12)
 
-        flags = {"en": "🇬🇧", "pl": "🇵🇱", "fr": "🇫🇷", "de": "🇩🇪", "es": "🇪🇸", "pt": "🇵🇹", "ru": "🇷🇺"}
+        flags = {"en": "🇬🇧", "pl": "🇵🇱", "fr": "🇫🇷", "de": "🇩🇪", "es": "🇪🇸", "pt": "🇵🇹", "ru": "🇷🇺", "it": "🇮🇹"}
         self._group = QButtonGroup(self)
         self._radios = {}
 

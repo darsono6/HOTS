@@ -1,18 +1,16 @@
-"""Custom frameless main window. On Windows it uses plain ctypes (no pywin32);
-on other platforms it is an ordinary frameless Qt window."""
 import ctypes
 import ctypes.wintypes as wt
 import sys
 from typing import Optional
 
 from PySide6.QtCore import (
-    Qt, QEvent, QPoint, QPointF, QAbstractAnimation, QEasingCurve,
+    Qt, QCoreApplication, QEvent, QPoint, QPointF, QAbstractAnimation, QEasingCurve,
     QPropertyAnimation, QTimer, Signal,
 )
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractButton, QAbstractScrollArea, QFrame, QHBoxLayout, QLabel,
-    QLayout, QStackedWidget, QWidget,
+    QGraphicsOpacityEffect, QLayout, QStackedWidget, QWidget,
 )
 
 from .constants import IS_LIGHT_THEME
@@ -242,7 +240,6 @@ class _Native:
         return True
 
     def refresh_frame(self, hwnd: int) -> None:
-        """A style/frame change only takes effect after SWP_FRAMECHANGED."""
         self.user32.SetWindowPos(
             hwnd, None, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
@@ -260,8 +257,6 @@ class _Native:
         return r
 
     def set_size(self, hwnd: int, w: int, h: int) -> None:
-        """Set the window size (physical px) without moving it or changing z-order.
-        The window has no system frame (WM_NCCALCSIZE), so window size == client size."""
         self.user32.SetWindowPos(hwnd, None, 0, 0, w, h,
                                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
 
@@ -273,7 +268,6 @@ class _Native:
         return 96
 
     def frame_thickness(self, hwnd: int):
-        """(horizontal, vertical) resize-frame thickness in px."""
         dpi = self.dpi(hwnd)
 
         def metric(idx: int) -> int:
@@ -336,8 +330,6 @@ class _Native:
         self._set_dwm_attr(hwnd, 20, 1 if dark else 0)         # DWMWA_USE_IMMERSIVE_DARK_MODE
 
     def taskbar_autohide_edge(self, hwnd: int) -> Optional[str]:
-        """'left'/'top'/'right'/'bottom' if the taskbar auto-hides and is on the window's
-        monitor, else None."""
         abd = _APPBARDATA()
         abd.cbSize = ctypes.sizeof(_APPBARDATA)
         state = self.shell32.SHAppBarMessage(ABM_GETSTATE, ctypes.byref(abd))
@@ -376,6 +368,8 @@ class _PopUpStack(QStackedWidget):
         super().__init__(parent)
         self._animated = True
         self._ani: Optional[QPropertyAnimation] = None
+        self._shot: Optional[QLabel] = None
+        self._shot_page: Optional[QWidget] = None
 
     def setAnimationEnabled(self, enabled: bool):
         self._animated = bool(enabled)
@@ -392,24 +386,44 @@ class _PopUpStack(QStackedWidget):
         if not self._animated:
             return
 
-        ani = QPropertyAnimation(widget, b"pos", self)
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        for _ in range(2):
+            QCoreApplication.sendPostedEvents(None, QEvent.MetaCall)
+            QCoreApplication.sendPostedEvents(None, QEvent.LayoutRequest)
+        shot = QLabel(self)
+        shot.setPixmap(widget.grab())
+        shot.setGeometry(widget.geometry().translated(0, self.DELTA_Y))
+        shot.show()
+        self._hide_page(widget)
+
+        ani = QPropertyAnimation(shot, b"pos", self)
         ani.setDuration(self.DURATION_MS)
         ani.setEasingCurve(QEasingCurve.OutQuad)
-        ani.setStartValue(QPoint(widget.x(), self.DELTA_Y))
-        ani.setEndValue(QPoint(widget.x(), 0))
-        ani.finished.connect(self._on_ani_finished)
-        self._ani = ani
+        ani.setStartValue(shot.pos())
+        ani.setEndValue(widget.pos())
+        ani.finished.connect(self._finish_animation)
+        self._ani, self._shot, self._shot_page = ani, shot, widget
         ani.start()
 
     def _finish_animation(self):
         ani = self._ani
-        if ani is not None and ani.state() == QAbstractAnimation.Running:
-            ani.stop()
-            ani.finished.disconnect(self._on_ani_finished)
+        if ani is None:
+            return
         self._ani = None
+        ani.stop()
+        ani.deleteLater()
+        self._shot.deleteLater()
+        self._show_page(self._shot_page)
 
-    def _on_ani_finished(self):
-        self._ani = None
+    @staticmethod
+    def _hide_page(widget: QWidget):
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.0)
+        widget.setGraphicsEffect(effect)
+
+    @staticmethod
+    def _show_page(widget: QWidget):
+        widget.setGraphicsEffect(None)
 
 
 class PageStack(QFrame):
@@ -634,7 +648,7 @@ class FramelessWindow(QWidget):
         super().__init__(parent)
         self._titlebar_offset = 0
         self._fullscreen_mode = False
-        self._good_px = None        # last good normal-window size (physical px)
+        self._good_px = None
         self._was_max = False
         self._in_sizemove = False
         self._mica = bool(IS_WIN and sys.getwindowsversion().build >= 22000)
@@ -758,7 +772,7 @@ class FramelessWindow(QWidget):
         if not IS_WIN or _native is None:
             return
         try:
-            self._apply_native(initial=True)     # creates the HWND (winId)
+            self._apply_native(initial=True)
             handle = self.windowHandle()
             if handle is not None:
                 handle.screenChanged.connect(self._on_screen_changed)
@@ -773,6 +787,8 @@ class FramelessWindow(QWidget):
             return
         try:
             hwnd = int(self.winId())
+            from . import win_icon
+            win_icon.apply(hwnd)
             if not self._fullscreen_mode:
                 _native.enforce_style(hwnd)
             _native.apply_effects(hwnd, dark=not IS_LIGHT_THEME, mica=self._mica,
@@ -805,7 +821,7 @@ class FramelessWindow(QWidget):
                 except Exception:
                     pass
         elif t == QEvent.ActivationChange and self.isActiveWindow():
-            self._apply_native()      # keep Mica/shadow after activation changes
+            self._apply_native()
 
     # Size guard: after maximize/restore (or opening a page) the window can grow by a dozen
     # pixels (Qt adds a system frame the window doesn't have). Remember the size when it is
@@ -849,7 +865,6 @@ class FramelessWindow(QWidget):
             print(f"Size guard warning: {e}")
 
     def _wanted_min_size(self):
-        """Minimum size requested by the app (MIN_WINDOW_SIZE), not what Qt computed from the layout."""
         from PySide6.QtCore import QSize
         w, h = getattr(self, "MIN_WINDOW_SIZE", (0, 0))
         return QSize(w, h) if w and h else self.minimumSize()
@@ -950,7 +965,7 @@ class FramelessWindow(QWidget):
                 if area is not None:
                     rect.left, rect.top, rect.right, rect.bottom = maximized_client_rect(
                         area[0], area[1], edge)
-                else:   # fallback: undo the frame stretch
+                else:
                     tx, ty = _native.frame_thickness(hwnd)
                     adjust_client_rect(rect, True, tx, ty, edge)
             return True, (WVR_REDRAW if msg.wParam else 0)

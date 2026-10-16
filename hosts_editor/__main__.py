@@ -14,7 +14,8 @@ def _setup_error_log():
         # The launcher (.pyw) may have already opened this log, so don't reopen it.
         # faulthandler must be enabled in either case.
         if getattr(sys.stderr, "name", None) != str(log_path):
-            sys.stderr = open(log_path, "w", encoding="utf-8", buffering=1)
+            mode = "w" if log_path.exists() and log_path.stat().st_size > 1_000_000 else "a"
+            sys.stderr = open(log_path, mode, encoding="utf-8", buffering=1)
             sys.stdout = sys.stderr
         faulthandler.enable(file=sys.stderr, all_threads=True)
     except Exception:
@@ -52,28 +53,14 @@ def _reg_get_password() -> str:
             val, _ = winreg.QueryValueEx(k, REG_VAL)
             if val:
                 return val
-    except Exception:
+    except FileNotFoundError:
         pass
-
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY) as k:
-            old_val, _ = winreg.QueryValueEx(k, REG_VAL)
-        if old_val:
-            _reg_set_password(old_val)
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_KEY,
-                                    0, winreg.KEY_SET_VALUE) as k:
-                    winreg.DeleteValue(k, REG_VAL)
-            except Exception:
-                pass
-            return old_val
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"_reg_get_password: cannot read the password hash: {e!r}", flush=True)
 
     return ""
 
-def _reg_set_password(hash_value: str):
+def _reg_set_password(hash_value: str) -> bool:
     try:
         import winreg
         if hash_value:
@@ -83,8 +70,9 @@ def _reg_set_password(hash_value: str):
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, REG_KEY,
                                 0, winreg.KEY_SET_VALUE) as k:
                 winreg.DeleteValue(k, REG_VAL)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _resource_path(name: str) -> str:
@@ -148,9 +136,9 @@ def _run():
 
     try:
         from .constants import load_settings
-        from .i18n import set_lang
+        from .i18n import set_lang, pick_lang
         _s = load_settings()
-        set_lang(_s.get("language", "en"))
+        set_lang(pick_lang(_s))
     except Exception:
         pass
 
@@ -202,10 +190,21 @@ def _run():
             win.setWindowIcon(_icon)
         app.setQuitOnLastWindowClosed(True)
 
+    def _launch_after_prompt():
+        try:
+            _launch()
+        except Exception:
+            tb = traceback.format_exc()
+            print(tb, flush=True)
+            if splash is not None:
+                splash.close()
+            _show_crash(tb)
+            app.exit(1)
+
     if password_hash:
         from .dialogs import PasswordPromptDialog
         dlg = PasswordPromptDialog(None, password_hash,
-                                   on_success=_launch, on_cancel=app.quit)
+                                   on_success=_launch_after_prompt, on_cancel=app.quit)
         dlg.show()
     else:
         _launch()
@@ -229,19 +228,29 @@ def _run():
     sys.exit(exit_code)
 
 
+def _crash_texts(tb: str, log_path):
+    try:
+        from .constants import load_settings
+        from .i18n import T, set_lang, pick_lang
+        set_lang(pick_lang(load_settings()))
+        return (T("startup_failed_title", app="HOTS Hosts"), T("startup_failed_msg"),
+                T("startup_failed_details", details=tb[:800], path=log_path))
+    except Exception:
+        return ("HOTS Hosts — Startup Error", "The program failed to start.",
+                f"Error details:\n{tb[:800]}\n\nFull log: {log_path}")
+
+
 def _show_crash(tb: str):
     try:
         from PySide6.QtWidgets import QApplication, QMessageBox
         _app = QApplication.instance() or QApplication(sys.argv)
-        msg = QMessageBox()
-        msg.setWindowTitle("HOTS Hosts — Startup Error")
-        msg.setIcon(QMessageBox.Critical)
-        msg.setText("The program failed to start.")
         log_path = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts" / "error.log"
-        msg.setInformativeText(
-            f"Error details:\n{tb[:800]}\n\n"
-            f"Full log: {log_path}"
-        )
+        title, text, details = _crash_texts(tb, log_path)
+        msg = QMessageBox()
+        msg.setWindowTitle(title)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setText(text)
+        msg.setInformativeText(details)
         msg.exec()
     except Exception:
         pass

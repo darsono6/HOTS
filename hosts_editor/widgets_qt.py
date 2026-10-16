@@ -20,7 +20,6 @@ from .ui_parts import IconWidget, IndeterminateProgressRing, TransparentToolButt
 
 
 def colored_svg_icon(fif_icon, color, theme=None, sizes=None) -> QIcon:
-    """Coloured QIcon from an FIF icon. `theme` is unused, kept for old call sites."""
     return make_qicon(fif_icon, color, sizes)
 
 
@@ -744,10 +743,47 @@ class HOTSDialog(QDialog):
             screen = QApplication.primaryScreen().geometry()
             self.move(screen.center() - self.rect().center())
 
+    def _fit_to_content(self):
+        lay = self.layout()
+        if lay is None:
+            return
+        self.ensurePolished()
+        for ch in self.findChildren(QWidget):
+            ch.updateGeometry()
+        lay.invalidate()
+        lay.activate()
+        w = self.width()
+        need = lay.totalHeightForWidth(w) if lay.hasHeightForWidth() else lay.totalSizeHint().height()
+        need = max(need, lay.totalMinimumSize().height())
+        cur = self.height()
+        if need <= cur:
+            return
+        scr = self.screen()
+        if scr is not None:
+            need = min(need, scr.availableGeometry().height() - 40)
+        self.resize(w, need)
+        if scr is not None:
+            avail = scr.availableGeometry()
+            y = max(avail.top(), min(self.y() - (need - cur) // 2, avail.bottom() - need))
+            self.move(self.x(), y)
+
     def showEvent(self, event):
         super().showEvent(event)
         try:
+            self._fit_to_content()
+            QTimer.singleShot(0, self._fit_to_content)
+            QTimer.singleShot(150, self._fit_to_content)
+            wh = self.windowHandle()
+            if wh is not None and not getattr(self, "_fit_hooked", False):
+                self._fit_hooked = True
+                wh.screenChanged.connect(lambda *_: QTimer.singleShot(0, self._fit_to_content))
+        except Exception:
+            pass
+        try:
             hwnd = int(self.winId())
+            from . import win_icon
+            win_icon.apply(hwnd)
+            QTimer.singleShot(300, lambda: win_icon.apply(int(self.winId())))
             _dwm_dark_titlebar(hwnd, dark=not IS_LIGHT_THEME)
             enable_rounded_corners(hwnd)
             _dwm_mica_dialog(hwnd, dark=not IS_LIGHT_THEME)
@@ -1419,10 +1455,7 @@ class HOTSSwitch(QCheckBox):
 
 
 class SmoothWheel(QObject):
-    """Smooth mouse-wheel scrolling (~150 ms animation instead of a jump). Touchpads,
-    high-resolution wheels (pixelDelta) and Ctrl/Shift wheel are left unchanged. For tables it
-    works only in ScrollPerPixel mode. step_px: pixels per wheel notch (default: the bar's
-    singleStep)."""
+    """Smooth wheel scrolling; for tables it works only in ScrollPerPixel mode."""
 
     def __init__(self, area: QAbstractScrollArea, step_px: Optional[int] = None):
         super().__init__(area)

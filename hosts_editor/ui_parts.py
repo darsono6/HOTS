@@ -19,7 +19,6 @@ from .icons import FIF, AppIcon, make_qicon
 
 
 def theme_color(variant: str = "primary") -> QColor:
-    """Accent colour adjusted to the theme. variant: primary, dark1..3, light1..3."""
     h, s, v, _ = QColor(DARK["accent"]).getHsvF()
     if h < 0:
         h = 0.0
@@ -130,9 +129,6 @@ class TransparentToolButton(QToolButton):
 
 
 class IndeterminateProgressRing(QWidget):
-    """Indeterminate progress ring (spinning arc). The animation runs only while the widget
-    is visible (start on show, stop on hide), so a hidden ring uses no CPU."""
-
     def __init__(self, parent: Optional[QWidget] = None, start: bool = True):
         super().__init__(parent)
         self._stroke = 6
@@ -268,10 +264,6 @@ class _BannerIcon(QWidget):
 
 
 class InfoBanner(QFrame):
-    """Info bar at the top edge of the window: icon, title, content, close button. Kinds: info,
-    success, warning, error; horizontal (title beside content) or vertical layout. Banners in
-    one window stack; closing one slides the others into its place."""
-
     closedSignal = Signal()
 
     MARGIN_TOP = 24
@@ -327,8 +319,6 @@ class InfoBanner(QFrame):
             text_lay.addSpacing(7)
         text_lay.addWidget(self._content, 1, Qt.AlignTop)
 
-        # Slot for extra widgets (see addWidget): a separate column beside the text when
-        # horizontal, under the text in the same column when vertical.
         self._widget_lay = QHBoxLayout()
         self._widget_lay.setSpacing(10)
         if horizontal:

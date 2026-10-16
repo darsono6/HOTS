@@ -1,8 +1,3 @@
-"""Fixed navigation rail: square icon tiles without labels (names appear only as
-tooltips via attach_fluent_tip, to the right of the rail).
-
-The module knows nothing about the window or pages: the caller supplies icons, texts and
-callbacks and decides which tile is selected (set_current)."""
 import re
 from typing import Callable, Dict, Optional
 
@@ -35,8 +30,6 @@ def _with_alpha(color: str, alpha: float) -> QColor:
 
 
 class NavTile(QAbstractButton):
-    """46x46 icon tile; the widget spans the full rail width (bigger click target), the square is drawn centred."""
-
     SQUARE = 46
     ICON = 22
     RADIUS = 10
@@ -149,7 +142,6 @@ class NavTile(QAbstractButton):
         base = self._opacity
         sel = self._sel_t
         pressed = enabled and self.isDown()
-        # hover fades out as selection fades in; a press is immediate
         hov = 1.0 if pressed else (self._hover_t if enabled else 0.0)
         hov *= (1.0 - sel)
 
@@ -176,8 +168,6 @@ class NavTile(QAbstractButton):
             p.drawRoundedRect(box, self.RADIUS, self.RADIUS)
 
         if self._attention:
-            # Attention outline: same width as the focus outline but more opaque, so it stays
-            # visible when the tile is also selected, focused or hovered.
             p.setBrush(Qt.NoBrush)
             p.setPen(QPen(_with_alpha(DARK["accent"], 0.9), 1))
             p.drawRoundedRect(box, self.RADIUS, self.RADIUS)
@@ -194,8 +184,6 @@ class NavTile(QAbstractButton):
             self._ico_selected.paint(p, ix, iy, self.ICON, self.ICON)
 
         if sel > 0:
-            # Active-page marker at the rail's left edge; rounded only on the right (the left
-            # half falls outside the widget and is clipped).
             p.setOpacity(base * sel)
             p.setPen(Qt.NoPen)
             p.setBrush(_css_color(DARK["accent"]))
@@ -294,8 +282,6 @@ class NavRail(QWidget):
         return self._current
 
     def set_locked(self, locked: bool, tip: str = ""):
-        """Disable/enable all tiles; while locked, each tooltip shows the lock reason (`tip`)
-        instead of the tile's name."""
         for tile in self._tiles.values():
             tile.setEnabled(not locked)
             tile.set_tip(tip if (locked and tip) else tile.default_tip)

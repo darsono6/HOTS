@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from ..icons import FIF
 from ..constants import DARK
@@ -7,7 +7,13 @@ from ..widgets_qt import HOTSDialog, HOTSButton, HOTSSwitch, h_separator
 from ..i18n import T
 
 
+_CHEVRON_CLOSED = FIF.CHEVRON_RIGHT_MED
+_CHEVRON_OPEN = FIF.CHEVRON_DOWN_MED
+
+
 class _OptionCard(QFrame):
+    expanded_changed = Signal()
+
     def __init__(self, title: str, desc: str, default: bool, enabled: bool, parent=None):
         super().__init__(parent)
         self.setStyleSheet(
@@ -15,21 +21,41 @@ class _OptionCard(QFrame):
             f"border-radius: 8px; }}"
         )
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setContentsMargins(14, 8, 14, 8)
         lay.setSpacing(3)
 
+        head = QHBoxLayout()
+        head.setSpacing(6)
         self.switch = HOTSSwitch(title, font_pt=9.5, spacing=10)
         self.switch.setChecked(bool(default and enabled))
         self.switch.setEnabled(enabled)
-        lay.addWidget(self.switch)
+        head.addWidget(self.switch, 1)
 
-        desc_lbl = QLabel(desc)
-        desc_lbl.setWordWrap(True)
-        desc_lbl.setStyleSheet(
+        self._toggle_btn = HOTSButton(
+            _CHEVRON_CLOSED, DARK["fg2"], "", accent=False, glyph_color=DARK["accent"],
+        )
+        self._toggle_btn.setFixedSize(38, 28)
+        self._toggle_btn.clicked.connect(self._toggle_desc)
+        head.addWidget(self._toggle_btn)
+        lay.addLayout(head)
+
+        self._desc_lbl = QLabel(desc)
+        self._desc_lbl.setWordWrap(True)
+        self._desc_lbl.setStyleSheet(
             f"color: {DARK['fg2']}; font-size: 8.3pt; background: transparent; "
             f"border: none; padding-left: 44px;"
         )
-        lay.addWidget(desc_lbl)
+        self._desc_lbl.setVisible(False)
+        lay.addWidget(self._desc_lbl)
+
+    def _toggle_desc(self):
+        show = not self._desc_lbl.isVisible()
+        self._desc_lbl.setVisible(show)
+        self._toggle_btn.set_icon(
+            _CHEVRON_OPEN if show else _CHEVRON_CLOSED,
+            color=DARK["fg2"], glyph_color=DARK["accent"],
+        )
+        self.expanded_changed.emit()
 
     def is_checked(self) -> bool:
         return self.switch.isChecked()
@@ -41,6 +67,9 @@ class UninstallWizardDialog(HOTSDialog):
         self._counts = counts or {}
         self.choices = None
         self._build()
+        for card in (self._card_hosts, self._card_privacy, self._card_data,
+                     self._card_domains, self._card_backups):
+            card.expanded_changed.connect(lambda: QTimer.singleShot(0, self._refit))
         self.adjustSize()
         self.center_on_parent()
 
@@ -120,15 +149,27 @@ class UninstallWizardDialog(HOTSDialog):
         confirm_btn.clicked.connect(self._confirm)
         btn_row.addWidget(confirm_btn)
 
+        cancel_btn = HOTSButton(FIF.CLOSE, DARK['fg'], T("uninst_btn_cancel"))
+        cancel_btn.fit_to_content()
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addSpacing(10)
+        btn_row.addWidget(cancel_btn)
+
         btn_row.addStretch()
 
         cl.addLayout(btn_row)
 
-    def reject(self):
-        # No Cancel button: uninstall proceeds regardless. The title-bar close
-        # button calls reject(), so route it to _confirm() to keep the user's
-        # current choices instead of silently discarding them.
-        self._confirm()
+    def _refit(self):
+        lay = self.layout()
+        for ch in self.findChildren(QWidget):
+            ch.updateGeometry()
+        lay.invalidate()
+        lay.activate()
+        self.resize(self.width(), max(lay.totalHeightForWidth(self.width()), self.minimumHeight()))
+        scr = self.screen()
+        if scr is not None:
+            avail = scr.availableGeometry()
+            self.move(self.x(), max(avail.top(), min(self.y(), avail.bottom() - self.height())))
 
     def _confirm(self):
         self.choices = {

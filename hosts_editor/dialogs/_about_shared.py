@@ -30,7 +30,7 @@ def _build_ssl_context():
     except Exception:
         return ssl.create_default_context()
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 
 GITHUB_REPO = "darsono6/HOTS"
 GITHUB_API_LATEST_RELEASE = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

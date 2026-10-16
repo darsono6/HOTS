@@ -1,5 +1,3 @@
-import hashlib
-
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit
 from PySide6.QtCore import QTimer
 
@@ -7,10 +5,7 @@ from ..icons import FIF
 from ..constants import DARK
 from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, attach_line_edit_context_menu
 from ..i18n import T
-
-
-def _hash(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+from ..password_utils import hash_password, verify_password
 
 
 def _pass_field(placeholder="") -> QLineEdit:
@@ -102,7 +97,7 @@ class SetPasswordDialog(HOTSDialog):
             if not old_val:
                 self._set_err(T("pwd_err_no_current"))
                 return
-            if _hash(old_val) != self._cur_hash:
+            if not verify_password(old_val, self._cur_hash):
                 self._set_err(T("pwd_err_wrong"))
                 self._old_edit.clear()
                 self._old_edit.setFocus()
@@ -122,7 +117,7 @@ class SetPasswordDialog(HOTSDialog):
             self._rep_edit.setFocus()
             return
 
-        self._on_save(_hash(new_val))
+        self._on_save(hash_password(new_val))
         self.accept()
         HOTSDialog.info(self.parent(), T("pwd_set_ok_title"), T("pwd_set_ok_msg"))
 
@@ -132,7 +127,7 @@ class SetPasswordDialog(HOTSDialog):
             if not old_val:
                 self._set_err(T("pwd_err_no_for_remove"))
                 return
-            if _hash(old_val) != self._cur_hash:
+            if not verify_password(old_val, self._cur_hash):
                 self._set_err(T("pwd_err_wrong"))
                 self._old_edit.clear()
                 self._old_edit.setFocus()
@@ -201,7 +196,7 @@ class PasswordPromptDialog(HOTSDialog):
         if not val:
             self._err.setText(T("pwd_err_empty_field"))
             return
-        if hashlib.sha256(val.encode()).hexdigest() != self._cur_hash:
+        if not verify_password(val, self._cur_hash):
             self._err.setText(T("pwd_err_wrong_retry"))
             self._entry.clear()
             self._entry.setFocus()

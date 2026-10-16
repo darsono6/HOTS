@@ -1,44 +1,73 @@
-import sys, os, traceback, ctypes
+import sys, os, time, traceback, ctypes, logging
 from pathlib import Path
+
+
+def _uninst_log(text: str) -> None:
+    try:
+        path = Path(os.environ.get("TEMP", Path.home())) / "hots_uninstall.log"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except Exception:
+        pass
+
+
+def _uninstall_password_ok(pw_file: str) -> bool:
+    # True when no password is set, or the password in pw_file matches. Fails closed on any error.
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\HOTS Hosts") as k:
+            stored_hash, _ = winreg.QueryValueEx(k, "AppPasswordHash")
+    except FileNotFoundError:
+        return True  # no key / no value = no password set
+    except Exception:
+        return False
+
+    if not stored_hash:
+        return True
+
+    try:
+        with open(pw_file, "r", encoding="utf-8") as f:
+            entered = f.read()
+    except Exception:
+        return False
+
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from hosts_editor.password_utils import verify_password
+    except Exception:
+        return False
+    return verify_password(entered, stored_hash)
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+
 
 if len(sys.argv) >= 3 and sys.argv[1] == "--verify-uninstall-password":
     def _verify_uninstall_password() -> int:
-        import hashlib
-        import winreg
-
         pw_file = sys.argv[2]
         try:
-            with open(pw_file, "r", encoding="utf-8") as f:
-                entered = f.read()
-        except Exception:
-            return 1
+            return 0 if _uninstall_password_ok(pw_file) else 1
         finally:
-            try:
-                os.remove(pw_file)
-            except Exception:
-                pass
-
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\HOTS Hosts") as k:
-                stored_hash, _ = winreg.QueryValueEx(k, "AppPasswordHash")
-        except Exception:
-            stored_hash = ""
-
-        if not stored_hash:
-            return 0
-
-        entered_hash = hashlib.sha256(entered.encode("utf-8")).hexdigest()
-        return 0 if entered_hash == stored_hash else 1
+            _remove_quietly(pw_file)
 
     sys.exit(_verify_uninstall_password())
 
 
-if len(sys.argv) >= 3 and sys.argv[1] == "--uninstall-cleanup":
-    def _run_uninstall_cleanup() -> int:
+# Uninstall, step 1 (shown by the uninstaller before anything is removed).
+# Exit code: 0 = confirmed (choices saved), 3 = cancelled, 2 = wrong password, 1 = error.
+if len(sys.argv) >= 3 and sys.argv[1] == "--uninstall-wizard":
+    def _run_uninstall_wizard() -> int:
         import json
 
-        result_path = sys.argv[2]
-        report = {"errors": [], "delete_data": False}
+        choices_path = sys.argv[2]
+        auth_path = sys.argv[3] if len(sys.argv) > 3 else ""
+        if not _uninstall_password_ok(auth_path):
+            return 2
 
         try:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,13 +81,13 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--uninstall-cleanup":
             )
 
             from hosts_editor.constants import load_settings
-            from hosts_editor.i18n import set_lang
+            from hosts_editor.i18n import set_lang, pick_lang
             from hosts_editor.widgets_qt import apply_global_style
             from hosts_editor.resource_utils import resource_path
             from hosts_editor import uninstall_flow
 
             settings = load_settings()
-            set_lang(settings.get("language", "en"))
+            set_lang(pick_lang(settings))
 
             app = QApplication.instance() or QApplication(sys.argv)
             apply_global_style(app)
@@ -77,13 +106,50 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--uninstall-cleanup":
 
             from hosts_editor.dialogs.uninstall_wizard import UninstallWizardDialog
             dlg = UninstallWizardDialog(counts=counts)
-            accepted = (dlg.exec() == QDialog.Accepted)
-            choices = dlg.choices if (accepted and dlg.choices) else {}
+            if dlg.exec() != QDialog.Accepted or not dlg.choices:
+                return 3
 
-            report = uninstall_flow.apply_uninstall_choices(choices)
+            with open(choices_path, "w", encoding="utf-8") as f:
+                json.dump(dlg.choices, f)
+            return 0
+        except Exception:
+            _uninst_log("[wizard] failed:\n" + traceback.format_exc())
+            return 1
+
+    sys.exit(_run_uninstall_wizard())
+
+
+# Uninstall, step 2 (run by hots_uninstall_cleanup.cmd): applies the saved choices.
+# Needs the password (when one is set), so it cannot be used to strip the protections by hand.
+if len(sys.argv) >= 4 and sys.argv[1] == "--uninstall-apply":
+    def _run_uninstall_apply() -> int:
+        import json
+
+        choices_path, result_path = sys.argv[2], sys.argv[3]
+        auth_path = sys.argv[4] if len(sys.argv) > 4 else ""
+        report = {"errors": [], "delete_data": False}
+
+        try:
+            if not _uninstall_password_ok(auth_path):
+                report["errors"].append("password check failed")
+            else:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                from hosts_editor import uninstall_flow
+
+                try:
+                    with open(choices_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    choices = {k: bool(v) for k, v in data.items()} if isinstance(data, dict) else {}
+                except Exception:
+                    _uninst_log("[apply] cannot read choices file:\n" + traceback.format_exc())
+                    choices = {}
+
+                report = uninstall_flow.apply_uninstall_choices(choices)
         except Exception as e:
+            _uninst_log("[apply] failed:\n" + traceback.format_exc())
             report.setdefault("errors", []).append(f"fatal: {e}")
 
+        _remove_quietly(auth_path)
         try:
             with open(result_path, "w", encoding="utf-8") as f:
                 json.dump(report, f)
@@ -92,14 +158,27 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--uninstall-cleanup":
 
         return 0
 
-    sys.exit(_run_uninstall_cleanup())
+    sys.exit(_run_uninstall_apply())
 
 
 log_path = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts" / "error.log"
 log_path.parent.mkdir(parents=True, exist_ok=True)
-_log = open(log_path, "w", encoding="utf-8", buffering=1)
+try:
+    _log_mode = "w" if log_path.stat().st_size > 250_000 else "a"
+except OSError:
+    _log_mode = "a"
+_log = open(log_path, _log_mode, encoding="utf-8", buffering=1)
 sys.stderr = _log
 sys.stdout = _log
+
+
+def _stamp() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+logging.basicConfig(stream=sys.stderr, level=logging.WARNING,
+                    format="%(asctime)s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
 
 def _is_admin() -> bool:
     try:
@@ -237,7 +316,6 @@ def _relaunch_as_admin():
         script = os.path.abspath(__file__)
         target = sys.executable
         params = f'"{script}"'
-    print(f"_relaunch_as_admin: target={target!r} params={params!r}", flush=True)
     ctypes.windll.kernel32.SetLastError(0)
     ret = ctypes.windll.shell32.ShellExecuteW(
         None,
@@ -247,23 +325,36 @@ def _relaunch_as_admin():
         None,
         1,
     )
-    last_err = ctypes.windll.kernel32.GetLastError()
-    print(f"_relaunch_as_admin: ShellExecuteW returned {ret} (GetLastError={last_err})", flush=True)
+    if ret <= 32:
+        last_err = ctypes.windll.kernel32.GetLastError()
+        print(f"{_stamp()} UAC relaunch failed: ShellExecuteW={ret} GetLastError={last_err} "
+              f"target={target!r} params={params!r}", flush=True)
     return ret > 32
 
-try:
-    print("START", flush=True)
+def _tr(key: str, fallback: str, **kw) -> str:
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        from hosts_editor.constants import load_settings
+        from hosts_editor.i18n import T, set_lang, pick_lang
+        set_lang(pick_lang(load_settings()))
+        return T(key, **kw)
+    except Exception:
+        return fallback.format(**kw)
 
+
+_exit_code = 0
+try:
     if not _acquire_single_instance_lock():
-        print("Program is already running — switching to existing window.", flush=True)
-        if not _signal_running_instance():
-            print("Event signal failed/unavailable — falling back to direct window focus.", flush=True)
+        if _signal_running_instance():
+            print(f"{_stamp()} already running: activated the existing window", flush=True)
+        else:
+            print(f"{_stamp()} already running: activation event failed, used window focus", flush=True)
             _focus_existing_instance()
         sys.exit(0)
 
     if not _is_admin():
-        print("Not admin — relaunching with UAC...", flush=True)
-        print(f"sys.executable={sys.executable!r} sys.argv={sys.argv!r} __file__={__file__!r} frozen={getattr(sys, 'frozen', False)} compiled={'__compiled__' in globals()}", flush=True)
         if _mutex_handle:
             try:
                 ctypes.windll.kernel32.CloseHandle(_mutex_handle)
@@ -272,20 +363,23 @@ try:
             _mutex_handle = None
         ok = _relaunch_as_admin()
         if ok:
+            print(f"{_stamp()} not admin: relaunched via UAC", flush=True)
             sys.exit(0)
         else:
-            print("ShellExecuteW failed or was declined by the user — aborting startup.", flush=True)
+            print(f"{_stamp()} not admin: UAC relaunch failed or was declined, startup aborted", flush=True)
             try:
                 from PySide6.QtWidgets import QApplication, QMessageBox
                 app = QApplication.instance() or QApplication(sys.argv)
                 m = QMessageBox()
                 m.setIcon(QMessageBox.Warning)
                 m.setWindowTitle("HOTS Hosts")
-                m.setText(
-                    "HOTS Hosts requires administrator privileges to run correctly.\n\n"
+                m.setText(_tr(
+                    "startup_admin_msg",
+                    "{app} requires administrator privileges to run correctly.\n\n"
                     "Startup was cancelled. Please launch the program again and accept "
-                    "the User Account Control (UAC) prompt."
-                )
+                    "the User Account Control (UAC) prompt.",
+                    app="HOTS Hosts",
+                ))
                 m.exec()
             except Exception as e2:
                 print(f"messagebox failed: {e2}", flush=True)
@@ -293,34 +387,29 @@ try:
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-    he_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hosts_editor")
-    print(f"hosts_editor path: {he_path}", flush=True)
-    if os.path.exists(he_path):
-        print(f"exists: True", flush=True)
-        print(f"files: {os.listdir(he_path)}", flush=True)
-    else:
-        print("exists: False (package is likely bundled inside the Nuitka standalone archive — this is normal for --standalone builds)", flush=True)
-
     import PySide6
-    print(f"PySide6: {PySide6.__version__}", flush=True)
 
     from hosts_editor.__main__ import main
-    print("main imported OK", flush=True)
+    print(f"{_stamp()} started ok (admin, PySide6 {PySide6.__version__})", flush=True)
     main()
 
-except SystemExit:
-    pass
+except SystemExit as _e:
+    _exit_code = _e.code if isinstance(_e.code, int) else (0 if _e.code is None else 1)
 except Exception:
+    _exit_code = 1
     tb = traceback.format_exc()
+    print(f"{_stamp()} startup error (sys.executable={sys.executable!r}, __file__={__file__!r})", flush=True)
     print(tb, flush=True)
     try:
         from PySide6.QtWidgets import QApplication, QMessageBox
         app = QApplication.instance() or QApplication(sys.argv)
         m = QMessageBox()
-        m.setWindowTitle("HOTS Hosts — Error")
+        m.setWindowTitle(_tr("startup_error_title", "{app} — Error", app="HOTS Hosts"))
         m.setText(tb[:1000])
         m.exec()
     except Exception as e2:
         print(f"messagebox failed: {e2}", flush=True)
 finally:
     _log.flush()
+
+sys.exit(_exit_code)

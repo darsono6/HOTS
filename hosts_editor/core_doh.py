@@ -7,6 +7,8 @@ from typing import List, Optional
 
 import winreg
 
+from .secure_storage import ensure_dir
+
 logger = logging.getLogger("HOTS.doh")
 
 HOTS_PROGRAMDATA_DIR = os.path.join(os.environ.get("PROGRAMDATA", "C:\\ProgramData"), "HOTS Hosts")
@@ -92,7 +94,7 @@ def _delete_hklm_value(subkey: str, name: str) -> None:
 
 def _atomic_write_json(path: str, data: dict) -> None:
     directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
+    ensure_dir(directory)
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".doh_", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:

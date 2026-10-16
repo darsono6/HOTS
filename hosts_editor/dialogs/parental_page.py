@@ -4,18 +4,18 @@ import shiboken6
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea,
 )
-from PySide6.QtCore import Qt, QObject, Signal
+from PySide6.QtCore import Qt, QObject, Signal, QSize
 from PySide6.QtGui import QColor
 
 from ..icons import FIF
-from ..ui_parts import IconWidget
+from ..ui_parts import IconWidget, TransparentToolButton
 from ..constants import DARK
 from ..core import toggle_parental_control, get_parental_active_map, HostsBusyError
 from ..core_antispy import HostsLockError, HostsLockManager
 from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_tip, make_folder_button, colored_svg_icon, SmoothWheel, EqualHeight
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
-from ..dns_utils import is_cf_family_active, enable_cf_family_dns, disable_cf_family_dns
+from ..dns_utils import is_cf_family_active, get_cf_status, format_dns_status, enable_cf_family_dns, disable_cf_family_dns
 
 from ._parental_shared import (
     CATEGORIES, _CATEGORY_COMMENT, _CF_ACCENT, _blocklists_dir,
@@ -32,7 +32,7 @@ class _HostsLockToggleSignals(QObject):
     done = Signal(bool)
 
 class _CfDnsStatusSignals(QObject):
-    done = Signal(bool)
+    done = Signal(bool, str)
 
 
 def _clear_layout(layout):
@@ -302,9 +302,23 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         title_row.addStretch()
         text_col.addLayout(title_row)
 
-        desc = QLabel(T("par_cf_desc"))
-        desc.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent;")
-        text_col.addWidget(desc)
+        dns_row = QHBoxLayout()
+        dns_row.setSpacing(4)
+        self._cf_dns_lbl = QLabel()
+        self._cf_dns_lbl.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent;")
+        dns_row.addWidget(self._cf_dns_lbl)
+
+        self._cf_refresh_btn = TransparentToolButton(FIF.SYNC)
+        self._cf_refresh_btn.setFixedSize(18, 18)
+        self._cf_refresh_btn.setIconSize(QSize(12, 12))
+        self._cf_refresh_btn.setIcon(colored_svg_icon(FIF.SYNC, QColor(DARK["accent"]), sizes=(12,)))
+        self._cf_refresh_btn.setCursor(Qt.PointingHandCursor)
+        attach_fluent_tip(self._cf_refresh_btn, T("par_cf_refresh"))
+        self._cf_refresh_btn.clicked.connect(self._on_cf_refresh_clicked)
+        dns_row.addWidget(self._cf_refresh_btn, 0, Qt.AlignVCenter)
+        dns_row.addStretch()
+        text_col.addLayout(dns_row)
+        self._set_cf_dns_text(getattr(self, "_cf_dns_text", ""))
 
         top_row.addLayout(text_col, 1)
         info_lay.addLayout(top_row)
@@ -326,9 +340,28 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         self._refresh_cf_status_async()
         return card
 
+    def _set_cf_dns_text(self, text: str):
+        self._cf_dns_text = text
+        lbl = getattr(self, "_cf_dns_lbl", None)
+        if lbl is None or not shiboken6.isValid(lbl):
+            return
+        shown = text or "\u2026"
+        full = f"DNS: {shown}"
+        lbl.setText(full if len(full) <= 90 else full[:89] + "\u2026")
+        lbl.setToolTip(full)
+
+    def _on_cf_refresh_clicked(self):
+        if getattr(self, "_toggle_op_active", False):
+            return
+        self._refresh_cf_status_async()
+
     def _refresh_cf_status_async(self):
         if getattr(self, "_toggle_op_active", False):
             return
+
+        rb = getattr(self, "_cf_refresh_btn", None)
+        if rb is not None and shiboken6.isValid(rb):
+            rb.setEnabled(False)
 
         signals = _CfDnsStatusSignals(self)
         signals.done.connect(self._on_cf_status_checked)
@@ -336,18 +369,23 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
 
         def worker():
             try:
-                active = is_cf_family_active()
+                active, dns_map = get_cf_status()
+                text = format_dns_status(dns_map)
             except Exception:
-                active = False
-            signals.done.emit(active)
+                active, text = False, "\u2014"
+            signals.done.emit(active, text)
 
         start_bg_thread(worker)
 
-    def _on_cf_status_checked(self, active: bool):
+    def _on_cf_status_checked(self, active: bool, dns_text: str):
         if not shiboken6.isValid(self) or is_shutting_down():
             return
+        rb = getattr(self, "_cf_refresh_btn", None)
+        if rb is not None and shiboken6.isValid(rb):
+            rb.setEnabled(True)
         if getattr(self, "_toggle_op_active", False):
             return
+        self._set_cf_dns_text(dns_text)
         btn = getattr(self, "_cf_btn", None)
         if btn is None or not shiboken6.isValid(btn):
             return
@@ -447,6 +485,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
 
         self._cf_active = res["active"]
         self._update_cf_btn()
+        self._refresh_cf_status_async()
 
         if adult_state is not None and res["adult_ok"]:
             adult_state["active"] = False

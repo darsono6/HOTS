@@ -42,8 +42,9 @@ class _DiffHighlighter(QSyntaxHighlighter):
 
 
 class DiffDialog(HOTSDialog):
-    def __init__(self, parent, old_text: str, new_text: str):
+    def __init__(self, parent, old_text: str, new_text: str, warning: str = ""):
         super().__init__(parent, title=T("diff_title"), min_width=720, min_height=480)
+        self._warning = warning
         self.confirmed = False
         self.discarded = False
 
@@ -103,6 +104,19 @@ class DiffDialog(HOTSDialog):
         cancel_btn.setFixedWidth(common_w)
 
         cl.addWidget(hdr)
+
+        if self._warning:
+            warn_w = QWidget()
+            warn_w.setStyleSheet(
+                f"background: {DARK['panel_bg']}; "
+                f"border: 1px solid {DARK['red']}; border-radius: 6px;")
+            warn_lay = QHBoxLayout(warn_w)
+            warn_lay.setContentsMargins(16, 10, 16, 10)
+            warn_lbl = QLabel(self._warning)
+            warn_lbl.setWordWrap(True)
+            warn_lbl.setStyleSheet(f"color: {DARK['fg']}; font-size: 9pt; background: transparent; border: none;")
+            warn_lay.addWidget(warn_lbl)
+            cl.addWidget(warn_w)
 
         if self._diff_lines:
             legend_w = QWidget()

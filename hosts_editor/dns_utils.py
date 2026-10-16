@@ -1,17 +1,24 @@
 import ctypes
 import ctypes.wintypes as wintypes
+import ipaddress
 import json
 import os
 import re
 import subprocess
+try:
+    import winreg
+except ImportError:
+    winreg = None
 from concurrent.futures import ThreadPoolExecutor
 
 from .core_antispy import CREATE_NO_WINDOW, _console_encoding, NETSH_EXE
+from .secure_storage import PROGRAMDATA_DIR, atomic_write_json
 
 CF_FAMILY_PRIMARY   = "1.1.1.3"
 CF_FAMILY_SECONDARY = "1.0.0.3"
 
-_BACKUP_PATH = os.path.join(os.environ.get("APPDATA", ""), "HOTS Hosts", "dns_backup.json")
+_BACKUP_PATH = os.path.join(PROGRAMDATA_DIR, "dns_backup.json")
+_LEGACY_BACKUP_PATH = os.path.join(os.environ.get("APPDATA", ""), "HOTS Hosts", "dns_backup.json")
 
 _AF_UNSPEC = 0
 _GAA_FLAG_SKIP_ANYCAST      = 0x0002
@@ -20,6 +27,12 @@ _GAA_FLAG_SKIP_DNS_SERVER   = 0x0008
 _ERROR_BUFFER_OVERFLOW = 111
 _ERROR_SUCCESS = 0
 _IF_OPER_STATUS_UP = 1
+_IF_TYPE_LOOPBACK = 24
+_IF_TYPE_TUNNEL = 131
+_SKIP_IF_TYPES = (_IF_TYPE_LOOPBACK, _IF_TYPE_TUNNEL)
+
+_iface_guid: dict[str, str] = {}
+_TCPIP_IFACES_KEY = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
 
 
 class _IP_ADAPTER_ADDRESSES(ctypes.Structure):
@@ -80,15 +93,42 @@ def get_active_interfaces() -> list[str]:
         p = ctypes.cast(buf, ctypes.POINTER(_IP_ADAPTER_ADDRESSES))
         while p:
             adapter = p[0]
-            if adapter.OperStatus == _IF_OPER_STATUS_UP and adapter.FriendlyName:
+            if (adapter.OperStatus == _IF_OPER_STATUS_UP and adapter.FriendlyName
+                    and adapter.IfType not in _SKIP_IF_TYPES):
                 interfaces.append(adapter.FriendlyName)
+                if adapter.AdapterName:
+                    try:
+                        _iface_guid[adapter.FriendlyName] = adapter.AdapterName.decode("ascii")
+                    except Exception:
+                        pass
             p = adapter.Next
         return interfaces
     except Exception:
         return []
 
 
-def get_dns_for_interface(iface: str) -> list[str]:
+def _is_dhcp_dns(iface: str) -> bool:
+    guid = _iface_guid.get(iface)
+    if winreg is None or not guid:
+        return False
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            _TCPIP_IFACES_KEY + "\\" + guid)
+    except OSError:
+        return False
+    try:
+        with key:
+            try:
+                value, _ = winreg.QueryValueEx(key, "NameServer")
+            except FileNotFoundError:
+                return True
+            return not str(value).strip()
+    except OSError:
+        return False
+
+
+def _read_dns_servers(iface: str) -> list[str]:
     try:
         out = subprocess.check_output(
             [NETSH_EXE, "interface", "ip", "show", "dns", f"name={iface}"],
@@ -107,6 +147,17 @@ def get_dns_for_interface(iface: str) -> list[str]:
             if not ip.startswith("127."):
                 servers.append(ip)
     return servers
+
+
+def get_dns_for_interface(iface: str) -> list[str]:
+    """Statically configured servers only (for backup); an empty list means DHCP."""
+    if _is_dhcp_dns(iface):
+        return []
+    return _read_dns_servers(iface)
+
+
+def get_dns_info(iface: str) -> tuple[bool, list[str]]:
+    return _is_dhcp_dns(iface), _read_dns_servers(iface)
 
 
 def set_dns_for_interface(iface: str, servers: list[str]) -> bool:
@@ -173,38 +224,99 @@ def _parallel_set_dns(iface_servers: dict[str, list[str]]) -> list[str]:
 
 
 def _save_dns_backup(backup: dict) -> None:
-    os.makedirs(os.path.dirname(_BACKUP_PATH), exist_ok=True)
-    with open(_BACKUP_PATH, "w", encoding="utf-8") as f:
-        json.dump(backup, f, ensure_ascii=False, indent=2)
+    atomic_write_json(_BACKUP_PATH, backup)
+
+
+def _clean_dns_backup(raw) -> dict | None:
+    # The backup is replayed as administrator, so only well-formed {interface: [IP addresses]} is accepted.
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for iface, servers in raw.items():
+        if (not isinstance(iface, str) or not iface or len(iface) > 256
+                or any(ord(c) < 32 for c in iface) or not isinstance(servers, list)):
+            continue
+        try:
+            out[iface] = [str(ipaddress.ip_address(s)) for s in servers]
+        except (ValueError, TypeError):
+            continue
+    return out or None
 
 
 def _load_dns_backup() -> dict | None:
-    if not os.path.exists(_BACKUP_PATH):
+    # Older versions kept the backup in the user's profile; it is validated and moved once.
+    if os.path.exists(_BACKUP_PATH):
+        try:
+            with open(_BACKUP_PATH, "r", encoding="utf-8") as f:
+                return _clean_dns_backup(json.load(f))
+        except Exception:
+            return None
+    if not os.path.exists(_LEGACY_BACKUP_PATH):
         return None
     try:
-        with open(_BACKUP_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(_LEGACY_BACKUP_PATH, "r", encoding="utf-8") as f:
+            data = _clean_dns_backup(json.load(f))
     except Exception:
         return None
+    if data:
+        try:
+            _save_dns_backup(data)
+            os.remove(_LEGACY_BACKUP_PATH)
+        except Exception:
+            pass
+    return data
 
 
 def _delete_dns_backup() -> None:
-    try:
-        if os.path.exists(_BACKUP_PATH):
-            os.remove(_BACKUP_PATH)
-    except Exception:
-        pass
+    for path in (_BACKUP_PATH, _LEGACY_BACKUP_PATH):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+
+
+def _parallel_dns_info(interfaces: list[str]) -> dict[str, tuple[bool, list[str]]]:
+    result: dict[str, tuple[bool, list[str]]] = {}
+    if not interfaces:
+        return result
+    with ThreadPoolExecutor(max_workers=len(interfaces)) as executor:
+        futures = {iface: executor.submit(get_dns_info, iface) for iface in interfaces}
+        for iface, future in futures.items():
+            try:
+                result[iface] = future.result()
+            except Exception:
+                result[iface] = (False, [])
+    return result
+
+
+def get_cf_status() -> tuple[bool, dict[str, tuple[bool, list[str]]]]:
+    """Single read pass: (filter active, {adapter: (from_dhcp, servers)})."""
+    interfaces = get_active_interfaces()
+    if not interfaces:
+        return os.path.exists(_BACKUP_PATH) or os.path.exists(_LEGACY_BACKUP_PATH), {}
+    info = _parallel_dns_info(interfaces)
+    active = any(CF_FAMILY_PRIMARY in servers or CF_FAMILY_SECONDARY in servers
+                 for _dhcp, servers in info.values())
+    return active, info
 
 
 def is_cf_family_active() -> bool:
-    interfaces = get_active_interfaces()
-    if not interfaces:
-        return os.path.exists(_BACKUP_PATH)
-    dns_map = _parallel_get_dns(interfaces)
-    for dns in dns_map.values():
-        if CF_FAMILY_PRIMARY in dns or CF_FAMILY_SECONDARY in dns:
-            return True
-    return False
+    return get_cf_status()[0]
+
+
+def format_dns_status(info: dict[str, tuple[bool, list[str]]]) -> str:
+    if not info:
+        return "\u2014"
+    parts = []
+    for iface, (dhcp, servers) in info.items():
+        addrs = ", ".join(servers)
+        if dhcp:
+            text = f"DHCP ({addrs})" if addrs else "DHCP"
+        else:
+            text = addrs or "\u2014"
+        parts.append(f"{iface}: {text}")
+    return " \u00b7 ".join(parts)
 
 
 def enable_cf_family_dns() -> tuple[bool, list[str]]:
@@ -243,5 +355,7 @@ def disable_cf_family_dns() -> tuple[bool, list[str]]:
 
     if not failed:
         _delete_dns_backup()
+    else:
+        _save_dns_backup({iface: backup[iface] for iface in failed if iface in backup})
 
     return len(failed) < len(backup), failed

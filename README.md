@@ -8,11 +8,13 @@
 
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%2864--bit%29-0078D4?logo=windows)](https://github.com/)
-[![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES%20%7C%20PT%20%7C%20RU-brightgreen)](#language-support)
+[![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES%20%7C%20PT%20%7C%20RU%20%7C%20IT-brightgreen)](#language-support)
 
 ### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
 
 *No account, no subscription, no ads. Just download and run.*
+
+<img src="hosts_editor/assets/hots_hosts_demo.gif" alt="HOTS Hosts in action" width="650"/>
 
 </div>
 
@@ -30,33 +32,6 @@ You don't need to understand *how* any of this works to use it — the app walks
 
 > **Looking for something simpler?** If you just want to lock down the hosts file with a custom blocklist and don't need parental controls or the privacy/telemetry module, check out **[HOTS Hosts Lite](https://github.com/darsono6/HOTS-Hosts-Lite)** — a smaller, focused sibling.
 
-<div align="center">
-
-<img src="hosts_editor/assets/screenshot_main.png" alt="Main Window" width="650"/>
-<br/><sub>Main window — table view with live search and entry management</sub>
-
-<br/><br/>
-
-<img src="hosts_editor/assets/screenshot_parental.png" alt="Parental Control Panel" width="650"/>
-<br/><sub>Parental Control — category blocklists with Cloudflare Family DNS toggle</sub>
-
-<br/><br/>
-
-<img src="hosts_editor/assets/screenshot_privacy.png" alt="Privacy Panel" width="650"/>
-<br/><sub>Privacy — tiered telemetry controls with drift detection</sub>
-
-<br/><br/>
-
-<img src="hosts_editor/assets/screenshot_diagnostics_domains.png" alt="Domain Existence Check" width="650"/>
-<br/><sub>Diagnostics — "Check domains" scanning entries against public DNS</sub>
-
-<br/><br/>
-
-<img src="hosts_editor/assets/screenshot_diagnostics_malware.png" alt="Malware Scanner" width="650"/>
-<br/><sub>Diagnostics — "Scan malware" heuristic engine flagging suspicious entries</sub>
-
-</div>
-
 ---
 
 ## Getting started
@@ -67,7 +42,8 @@ You don't need to understand *how* any of this works to use it — the app walks
 
 **Requires:** Windows 10 or 11, 64-bit.
 
-### About the Windows warning you might see
+<details>
+<summary><strong>Windows shows a “protected your PC” warning?</strong> — click to expand</summary>
 
 Since this is a small independent project without a paid certificate, Windows may show a **"Windows protected your PC"** warning the first time you run it. This is normal for any new app that hasn't built up a download history yet — it does **not** mean anything is wrong with the file.
 
@@ -77,25 +53,21 @@ If you'd rather double-check the app yourself first, the full source code is rig
 
 See **[CODE_SIGNING.md](CODE_SIGNING.md)** for full details on why the release isn't signed yet and how release builds are produced.
 
----
-
-## What's new in 2.3
-
-- **Significantly lower resource usage** — the app no longer depends on PySide6-Fluent-Widgets and runs on its own lightweight window and widgets
-- **Code optimization** throughout the application
-- **A fifth accent color**
-- **Refreshed look** and a number of small UI fixes
-- **Uninstall wizard** — instead of an all-or-nothing removal, the uninstaller now asks exactly what to undo: domain blocks + DNS-over-HTTPS + Cloudflare Family DNS, Privacy-tools changes, saved configuration, your custom domain list (kept by default), and hosts file backups. Anything left unchecked stays exactly as it was.
-- A heads-up before uninstalling: if you're only trying to install a newer version, you don't need to uninstall first — the installer now reminds you of that and lets you back out.
-- Reinstalling or updating over an existing install now starts from a clean installation folder, so files removed or renamed between versions no longer pile up on your system.
-- Fixed: Cloudflare Family DNS could stay enabled on the network adapter after uninstalling; it's now reverted along with the other domain-blocking configuration if you choose to.
+</details>
 
 ---
 
 ## Everything it can do
 
+### 🛡️ Parental Control
+
+<div align="center">
+<img src="hosts_editor/assets/screenshot_parental.png" alt="Parental Control Panel" width="650"/>
+<br/><sub>Parental Control — category blocklists with Cloudflare Family DNS toggle</sub>
+</div>
+
 <details>
-<summary><strong>🛡️ Parental Control</strong> — click to expand</summary>
+<summary><strong>Details</strong> — click to expand</summary>
 
 - One-click blocklists for 15 categories: Twitter/X, Instagram, YouTube, Facebook, WhatsApp, TikTok, Twitch, Snapchat, Pinterest, Reddit, adult content, games, torrents, dating sites, random video chat
 - **Cloudflare Family DNS** — one click adds DNS-level filtering on top of the blocklists
@@ -107,8 +79,15 @@ See **[CODE_SIGNING.md](CODE_SIGNING.md)** for full details on why the release i
 
 </details>
 
+### 🕵️ Windows Privacy
+
+<div align="center">
+<img src="hosts_editor/assets/screenshot_privacy.png" alt="Privacy Panel" width="650"/>
+<br/><sub>Privacy — tiered telemetry controls with drift detection</sub>
+</div>
+
 <details>
-<summary><strong>🕵️ Windows Privacy</strong> — click to expand</summary>
+<summary><strong>Details</strong> — click to expand</summary>
 
 37 individual telemetry and tracking settings, grouped into four levels (Basic → Privacy+) so you can go as light or as aggressive as you want. Covers Windows telemetry services, advertising ID, activity history, location tracking, Recall, and more. Every setting can be reviewed and toggled individually, and reverted at any time.
 
@@ -116,8 +95,22 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 
 </details>
 
+### ✏️ Hosts File Editor
+
+<div align="center">
+<img src="hosts_editor/assets/screenshot_main.png" alt="Main Window" width="650"/>
+<br/><sub>Main window — table view with live search and entry management</sub>
+</div>
+
+<table align="center">
+<tr>
+<td align="center" width="50%"><img src="hosts_editor/assets/screenshot_diagnostics_domains.png" alt="Domain Existence Check"/><br/><sub>Diagnostics — “Check domains” scanning entries against public DNS</sub></td>
+<td align="center" width="50%"><img src="hosts_editor/assets/screenshot_diagnostics_malware.png" alt="Malware Scanner"/><br/><sub>Diagnostics — “Scan malware” heuristic engine flagging suspicious entries</sub></td>
+</tr>
+</table>
+
 <details>
-<summary><strong>✏️ Hosts File Editor</strong> — click to expand</summary>
+<summary><strong>Details</strong> — click to expand</summary>
 
 - Table view of all entries, live search, bulk paste, sorting
 - Add / edit / delete / enable-disable entries without touching Notepad
@@ -133,13 +126,31 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 <summary><strong>🎨 Other features</strong> — click to expand</summary>
 
 - Light and dark themes, 5 accent colors, custom window with Mica backdrop on Windows 11
-- 7 languages: English, Polski, Français, Deutsch, Español, Português, Русский
+- 8 languages: English, Polski, Français, Deutsch, Español, Português, Русский, Italiano
 - Optional password protection (required to open the app or uninstall it)
 - Uninstall wizard — choose exactly what to undo (domain blocks, DNS, privacy settings, saved configuration, custom domain list, hosts backups) instead of an all-or-nothing removal
 - Built-in update checker
 - Auto-elevation, single-instance guard, window geometry memory
 
 </details>
+
+---
+
+## What's new in 2.4
+
+- **Italian language added** — the interface is now available in 8 languages
+- **Stronger password storage** — the startup password is now stored as a salted hash (existing passwords keep working and are upgraded the next time you change the password)
+- Minor improvements throughout the application's code
+
+---
+
+<div align="center">
+
+### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
+
+*No account, no subscription, no ads.*
+
+</div>
 
 ---
 
@@ -192,9 +203,11 @@ hosts_editor/
 ├── ui_parts.py                # Small widgets — icon widget, toolbar button, progress ring, info banner
 ├── icons.py                   # Built-in SVG icon set
 ├── resource_utils.py       # Base-path resolution (dev / frozen / Nuitka builds)
+├── win_icon.py             # Sets the window/taskbar icon explicitly via WinAPI (no default icon)
 ├── dns_utils.py              # DNS management — native interface lookup, Cloudflare Family DNS orchestration
+├── secure_storage.py         # Protected state storage — hardens the ProgramData folder, atomic JSON writes
 ├── uninstall_flow.py       # Uninstall cleanup logic — mandatory system-lock teardown + optional, wizard-driven reverts
-├── i18n.py                     # Multilingual string system (EN / PL / FR / DE / ES / PT / RU)
+├── i18n.py                     # Multilingual string system (EN / PL / FR / DE / ES / PT / RU / IT)
 ├── graphic/
 │   ├── logo.png                              # About page logo
 │   ├── logo.ico                                # Window/taskbar icon
@@ -228,7 +241,6 @@ hosts_editor/
 ```
 
 </details>
-</details>
 
 ---
 
@@ -245,6 +257,7 @@ The interface language can be changed in **Options → Language**. All UI string
 | `es` | Español |
 | `pt` | Português |
 | `ru` | Русский |
+| `it` | Italiano |
 
 ---
 

@@ -27,11 +27,11 @@ from .nav_rail import NavRail
 from .frameless import FramelessWindow
 
 from .constants import DARK, DEFAULT_ACCENT, HOSTS_PATH, accent_rgba, load_settings, save_settings
-from .i18n import T, set_lang, current_lang
+from .i18n import T, set_lang, current_lang, pick_lang
 from .core import (
     parse_hosts, save_hosts, entries_to_text,
     import_from_path, export_to_path, is_valid_ip, MAX_ACTIVE_ENTRIES,
-    HostsBusyError, _looks_like_malformed_entry, _looks_like_entry,
+    HostsBusyError, _looks_like_malformed_entry, _looks_like_entry, parental_broken_keys,
 )
 from .core_antispy import HostsLockManager
 from .core_appblock import AppBlockManager
@@ -129,7 +129,7 @@ class ClickableLabel(QLabel):
         super().mousePressEvent(event)
 
 class SaveWorker(QThread):
-    finished  = Signal(bool)
+    done      = Signal(bool)
     error_msg = Signal(str)
 
     def __init__(self, hosts_path, entries, parent=None):
@@ -141,13 +141,13 @@ class SaveWorker(QThread):
 
         try:
             save_hosts(self._path, self._entries)
-            self.finished.emit(True)
+            self.done.emit(True)
         except HostsBusyError:
             self.error_msg.emit(T("save_perm_msg"))
-            self.finished.emit(False)
+            self.done.emit(False)
         except Exception as ex:
             self.error_msg.emit(str(ex))
-            self.finished.emit(False)
+            self.done.emit(False)
 
 class _HostsHighlighter(QSyntaxHighlighter):
     def __init__(self, doc):
@@ -164,11 +164,17 @@ class _HostsHighlighter(QSyntaxHighlighter):
         self._fmt_free_text.setForeground(QColor(DARK["fg2"]))
         self._fmt_free_text.setFontItalic(True)
 
+        self._fmt_marker = QTextCharFormat()
+        self._fmt_marker.setForeground(QColor(DARK["accent"]))
+        self._fmt_marker.setFontWeight(QFont.Bold)
+
     def highlightBlock(self, text: str):
         stripped = text.strip()
         if not stripped:
             return
-        if stripped.startswith("#"):
+        if stripped.startswith("# === HOSTS_EDITOR_PARENTAL_"):
+            self.setFormat(0, len(text), self._fmt_marker)
+        elif stripped.startswith("#"):
             self.setFormat(0, len(text), self._fmt_comment)
         elif _looks_like_entry(stripped):
             self.setFormat(0, len(text), self._fmt_active)
@@ -349,7 +355,7 @@ class HostsEditor(FramelessWindow):
         super().__init__()
 
         self._settings = load_settings()
-        set_lang(self._settings.get("language", "en"))
+        set_lang(pick_lang(self._settings))
         self.entries: list = []
         self._dirty  = False
         self._saved_text = ""
@@ -659,8 +665,8 @@ class HostsEditor(FramelessWindow):
         self._startup_update_worker = worker
         worker.finished_ok.connect(self._on_startup_update_check_ok)
         worker.failed.connect(lambda err: None)
-        worker.finished.connect(worker.deleteLater)
         register_qthread(worker)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
     def _on_startup_update_check_ok(self, tag: str, url: str):
@@ -903,10 +909,6 @@ class HostsEditor(FramelessWindow):
 
     def _nav(self, fn, route_key=None):
         def _wrapper():
-
-            sel_model_before = hasattr(self, "table") and self.table.selectionModel()
-            had_selection = bool(sel_model_before and sel_model_before.hasSelection())
-
             def _deferred():
                 fn()
                 # Always refresh the rail: actions without a route_key (password/language/theme)
@@ -916,10 +918,6 @@ class HostsEditor(FramelessWindow):
                 if route_key and current is not None and current is not self._main_widget:
                     self._page_route_map[current.objectName()] = route_key
                 self._sync_rail()
-                if had_selection and hasattr(self, "table"):
-                    sel_model = self.table.selectionModel()
-                    if sel_model is not None and not sel_model.hasSelection():
-                        pass
 
             QTimer.singleShot(0, _deferred)
 
@@ -1993,14 +1991,18 @@ class HostsEditor(FramelessWindow):
             return
 
         try:
-            with open(HOSTS_PATH, "r", encoding="utf-8", errors="replace") as f:
-                old_text = f.read()
+            from .core import _read_hosts_text
+            old_text = _read_hosts_text(HOSTS_PATH)
         except Exception:
             old_text = ""
         new_text = entries_to_text(self.entries)
 
+        warning = ""
+        if parental_broken_keys(new_text) - parental_broken_keys(old_text):
+            warning = T("marker_warn_msg")
+
         from .dialogs import DiffDialog
-        dlg = DiffDialog(self, old_text, new_text)
+        dlg = DiffDialog(self, old_text, new_text, warning=warning)
         dlg.exec()
         if dlg.discarded:
             self._load()
@@ -2012,7 +2014,7 @@ class HostsEditor(FramelessWindow):
 
         self.status_bar.setText(T("status_saving"))
         self._worker = SaveWorker(HOSTS_PATH, self.entries, self)
-        self._worker.finished.connect(self._on_save_finished)
+        self._worker.done.connect(self._on_save_finished)
         self._worker.error_msg.connect(self._on_save_error)
 
         register_qthread(self._worker)
@@ -2199,10 +2201,21 @@ class HostsEditor(FramelessWindow):
             for e in self.entries
         ]
         fixed_entries = []
-        seen_pairs = set()
+        seen_pairs = {}
         wildcards_fixed = dups_removed = invalid_removed = normalized = 0
 
+        in_block = []
+        inside = False
         for e in self.entries:
+            raw = e.get("raw", "") if e["enabled"] is None else ""
+            if "# === HOSTS_EDITOR_PARENTAL_" in raw:
+                if "_START ===" in raw:
+                    inside = True
+                elif "_END ===" in raw:
+                    inside = False
+            in_block.append(inside)
+
+        for idx, e in enumerate(self.entries):
             if e["enabled"] is None:
 
                 if _looks_like_malformed_entry(e.get("raw", "")):
@@ -2233,6 +2246,20 @@ class HostsEditor(FramelessWindow):
             pair_key = (ip.strip(), host_clean, bool(e["enabled"]))
             if pair_key in seen_pairs:
                 dups_removed += 1
+                prev_entry, prev_in_block = seen_pairs[pair_key]
+                if in_block[idx] and not prev_in_block:
+                    # a copy outside the block markers is redundant: keep the entry from the block
+                    fixed_entries[:] = [x for x in fixed_entries if x is not prev_entry]
+                    if prev_entry["comment"] and prev_entry["comment"] not in comment:
+                        comment = f"{comment} | {prev_entry['comment']}" if comment else prev_entry["comment"]
+                    new_entry = {
+                        "enabled": e["enabled"], "ip": ip,
+                        "hostname": host_clean, "comment": comment,
+                        "raw": e.get("raw", ""),
+                    }
+                    fixed_entries.append(new_entry)
+                    seen_pairs[pair_key] = (new_entry, True)
+                    continue
                 if comment:
                     for prev in reversed(fixed_entries):
                         if (prev["enabled"] is not None
@@ -2246,12 +2273,13 @@ class HostsEditor(FramelessWindow):
                                 prev["comment"] = comment
                             break
                 continue
-            seen_pairs.add(pair_key)
-            fixed_entries.append({
+            new_entry = {
                 "enabled": e["enabled"], "ip": ip,
                 "hostname": host_clean, "comment": comment,
                 "raw": e.get("raw", ""),
-            })
+            }
+            seen_pairs[pair_key] = (new_entry, in_block[idx])
+            fixed_entries.append(new_entry)
 
         new_state = [
             (e.get("ip", ""), e.get("hostname", ""), e.get("comment", ""), e.get("enabled"))

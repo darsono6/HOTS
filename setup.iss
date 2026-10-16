@@ -1,6 +1,6 @@
 ﻿
 #define MyAppName "HOTS Hosts"
-#define MyAppVersion "2.3"
+#define MyAppVersion "2.4"
 #define MyAppPublisher "Darsono"
 #define MyAppExeName "HOTS Hosts.exe"
 #define MyAppAssocName MyAppName + " File"
@@ -57,15 +57,51 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{app}\hots_uninstall_cleanup.cmd"; Flags: runhidden waituntilterminated
+Filename: "{app}\hots_uninstall_cleanup.cmd"; Parameters: """{app}\hots_uninst_choices.json"" ""{userappdata}\HOTS Hosts\hots_uninst_auth.tmp"""; Flags: runhidden waituntilterminated
 
 [UninstallDelete]
 ; hots_uninstall_cleanup.cmd removes ProgramData/AppData user data and runs
 ; BEFORE this step. {app} holds only program files (no user data), so the
 ; whole folder can be deleted, including files not listed in [Files].
-Type: filesandordirs; Name: "{app}"
+Type: filesandordirs; Name: "{app}"; Check: IsOwnFolderName
 
 [Code]
+
+var
+  VerifiedPassword: String;
+
+// The install folder is wiped on update and on uninstall, so it must always be a
+// folder dedicated to this program. Whatever location the user picks, the program
+// is installed in a subfolder named "{#MyAppName}" (e.g. D:\Apps -> D:\Apps\{#MyAppName}),
+// so these steps can never touch C:\Windows, C:\Program Files, a drive root, etc.
+function IsOwnFolderName(): Boolean;
+begin
+  Result := CompareText(ExtractFileName(RemoveBackslash(ExpandConstant('{app}'))), '{#MyAppName}') = 0;
+end;
+
+// Stricter check for the install-time wipe: the folder must also contain our own files.
+function IsOwnInstallFolder(): Boolean;
+var
+  Dir: String;
+begin
+  Dir := RemoveBackslash(ExpandConstant('{app}'));
+  Result := IsOwnFolderName() and
+            FileExists(Dir + '\{#MyAppExeName}') and
+            FileExists(Dir + '\hots_uninstall_cleanup.cmd');
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Dir: String;
+begin
+  Result := True;
+  if CurPageID = wpSelectDir then
+  begin
+    Dir := RemoveBackslash(WizardDirValue);
+    if CompareText(ExtractFileName(Dir), '{#MyAppName}') <> 0 then
+      WizardForm.DirEdit.Text := Dir + '\{#MyAppName}';
+  end;
+end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
@@ -74,7 +110,10 @@ begin
     // {app} holds no user data (password/settings/block lists live in
     // ProgramData and AppData), so wipe it before copying new files; otherwise
     // files removed or renamed in newer builds (e.g. old Nuitka DLLs) would linger.
-    DelTree(ExpandConstant('{app}'), True, True, True);
+    // Safety: only wipe a folder that really is a previous HOTS Hosts install
+    // (right folder name + both of our own files), never an arbitrary folder.
+    if IsOwnInstallFolder() then
+      DelTree(ExpandConstant('{app}'), True, True, True);
   end;
 end;
 
@@ -97,6 +136,16 @@ begin
 
   if FileExists(TempFile) then
     DeleteFile(TempFile);
+end;
+
+function ChoicesFile(): String;
+begin
+  Result := ExpandConstant('{app}\hots_uninst_choices.json');
+end;
+
+function AuthFilePath(): String;
+begin
+  Result := ExpandConstant('{userappdata}\HOTS Hosts\hots_uninst_auth.tmp');
 end;
 
 function GetAppLanguage(): String;
@@ -132,7 +181,7 @@ begin
       Lang := Copy(Line, 1, P2 - 1);
 
       if (Lang = 'pl') or (Lang = 'fr') or (Lang = 'de') or (Lang = 'es')
-         or (Lang = 'ru') or (Lang = 'pt') or (Lang = 'en') then
+         or (Lang = 'ru') or (Lang = 'pt') or (Lang = 'it') or (Lang = 'en') then
         Result := Lang;
       Exit;
     end;
@@ -193,6 +242,14 @@ begin
     TooManyText := 'Demasiadas tentativas falhadas. A desinstalação foi cancelada.';
     OkText := 'OK';
     CancelText := 'Cancelar';
+  end
+  else if Lang = 'it' then
+  begin
+    PromptText := 'Questo programma è protetto da password. Inserisci la password per continuare la disinstallazione:';
+    IncorrectPrefix := 'Password errata. Tentativi rimasti: ';
+    TooManyText := 'Troppi tentativi falliti. La disinstallazione è stata annullata.';
+    OkText := 'OK';
+    CancelText := 'Annulla';
   end
   else
   begin
@@ -265,6 +322,7 @@ begin
     begin
       if VerifyUninstallPassword(EditPwd.Text) then
       begin
+        VerifiedPassword := EditPwd.Text;
         Form.Free();
         Result := True;
         Exit;
@@ -336,6 +394,13 @@ begin
       'listas de bloqueio.' + #13#10 + #13#10 +
       'Ainda assim, deseja continuar e remover completamente o HOTS Hosts, revertendo as ' +
       'alterações feitas neste sistema?'
+  else if Lang = 'it' then
+    Result :=
+      'Se stai per installare una versione più recente di HOTS Hosts, non è necessario ' +
+      'disinstallare prima: basta avviare direttamente il nuovo programma di installazione. ' +
+      'Aggiornerà il programma sul posto, senza perdere impostazioni, password o liste di blocco.' + #13#10 + #13#10 +
+      'Vuoi comunque continuare e rimuovere completamente HOTS Hosts, annullando le modifiche ' +
+      'apportate al sistema?'
   else
     Result :=
       'If you are about to install a newer version of HOTS Hosts, you do NOT need to ' +
@@ -343,6 +408,98 @@ begin
       'program in place, without losing your settings, password or blocklists.' + #13#10 + #13#10 +
       'Do you want to continue and completely remove HOTS Hosts, undoing the changes ' +
       'it made to this system?';
+end;
+
+function GetWizardFailedText(): String;
+var
+  Lang: String;
+begin
+  Lang := GetAppLanguage();
+
+  if Lang = 'pl' then
+    Result :=
+      'Nie udało się otworzyć okna wyboru elementów do usunięcia. Jeśli kontynuujesz, program ' +
+      'zostanie odinstalowany, ale Twoje ustawienia, blokady i kopie zapasowe pozostaną na komputerze.' + #13#10 + #13#10 +
+      'Czy mimo to kontynuować?'
+  else if Lang = 'fr' then
+    Result :=
+      'La fenêtre de choix des éléments à supprimer n''a pas pu s''ouvrir. Si vous continuez, le ' +
+      'programme sera désinstallé, mais vos paramètres, blocages et sauvegardes resteront sur cet ordinateur.' + #13#10 + #13#10 +
+      'Continuer quand même ?'
+  else if Lang = 'de' then
+    Result :=
+      'Das Fenster zur Auswahl der zu entfernenden Elemente konnte nicht geöffnet werden. Wenn Sie ' +
+      'fortfahren, wird das Programm deinstalliert, Ihre Einstellungen, Sperren und Sicherungen ' +
+      'bleiben jedoch auf diesem Computer.' + #13#10 + #13#10 + 'Trotzdem fortfahren?'
+  else if Lang = 'es' then
+    Result :=
+      'No se pudo abrir la ventana para elegir qué eliminar. Si continúas, el programa se ' +
+      'desinstalará, pero tu configuración, bloqueos y copias de seguridad permanecerán en este equipo.' + #13#10 + #13#10 +
+      '¿Continuar de todos modos?'
+  else if Lang = 'ru' then
+    Result :=
+      'Не удалось открыть окно выбора элементов для удаления. Если продолжить, программа будет ' +
+      'удалена, но ваши настройки, блокировки и резервные копии останутся на этом компьютере.' + #13#10 + #13#10 +
+      'Всё равно продолжить?'
+  else if Lang = 'pt' then
+    Result :=
+      'Não foi possível abrir a janela de escolha do que remover. Se continuar, o programa será ' +
+      'desinstalado, mas as suas definições, bloqueios e cópias de segurança permanecerão neste computador.' + #13#10 + #13#10 +
+      'Continuar mesmo assim?'
+  else if Lang = 'it' then
+    Result :=
+      'Non è stato possibile aprire la finestra per scegliere cosa rimuovere. Se continui, il ' +
+      'programma verrà disinstallato, ma le tue impostazioni, i blocchi e i backup resteranno su questo computer.' + #13#10 + #13#10 +
+      'Continuare comunque?'
+  else
+    Result :=
+      'The window for choosing what to remove could not be opened. If you continue, the program ' +
+      'will be uninstalled, but your settings, blocks and backups will stay on this computer.' + #13#10 + #13#10 +
+      'Continue anyway?';
+end;
+
+// Shows the "what should we undo?" wizard before anything is removed, so closing it or
+// pressing Cancel really cancels the uninstall. The choices are applied later by
+// hots_uninstall_cleanup.cmd. Exit codes of the wizard: 0 = confirmed, 3 = cancelled, 2 = wrong password.
+function RunUninstallWizard(): Boolean;
+var
+  ResultCode: Integer;
+  AuthFile: String;
+  Launched: Boolean;
+begin
+  Result := True;
+  if UninstallSilent then
+    Exit;
+
+  AuthFile := AuthFilePath();
+  DeleteFile(AuthFile);
+  if VerifiedPassword <> '' then
+  begin
+    ForceDirectories(ExtractFilePath(AuthFile));
+    SaveStringToFile(AuthFile, VerifiedPassword, False);
+  end;
+
+  DeleteFile(ChoicesFile());
+  Launched := Exec(ExpandConstant('{app}\{#MyAppExeName}'),
+                   '--uninstall-wizard "' + ChoicesFile() + '" "' + AuthFile + '"',
+                   '', SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode);
+
+  if Launched and ((ResultCode = 2) or (ResultCode = 3)) then
+    Result := False
+  else if not (Launched and (ResultCode = 0) and FileExists(ChoicesFile())) then
+    Result := MsgBox(GetWizardFailedText(), mbError, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+
+  if not Result then
+  begin
+    DeleteFile(AuthFile);
+    DeleteFile(ChoicesFile());
+  end;
+end;
+
+procedure DeinitializeUninstall();
+begin
+  DeleteFile(AuthFilePath());
+  DeleteFile(ChoicesFile());
 end;
 
 function InitializeUninstall(): Boolean;
@@ -360,16 +517,19 @@ begin
     end;
   end;
 
-  if not RegQueryStringValue(HKLM, 'Software\HOTS Hosts', 'AppPasswordHash', Hash) then
-    Exit;
-  if Hash = '' then
-    Exit;
-
-  if UninstallSilent then
+  if RegQueryStringValue(HKLM, 'Software\HOTS Hosts', 'AppPasswordHash', Hash) and (Hash <> '') then
   begin
-    Result := False;
-    Exit;
+    if UninstallSilent then
+    begin
+      Result := False;
+      Exit;
+    end;
+    if not AskUninstallPassword() then
+    begin
+      Result := False;
+      Exit;
+    end;
   end;
 
-  Result := AskUninstallPassword();
+  Result := RunUninstallWizard();
 end;

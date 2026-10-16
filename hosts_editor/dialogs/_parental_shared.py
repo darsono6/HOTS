@@ -366,7 +366,8 @@ class _ParentalCardMixin:
         if not dlg.exec():
             return
         if state["active"]:
-            self._run_toggle(state, True, on_done=self._refresh_custom_domains_card, notify=False)
+            has_domains = bool(_read_custom_domains(state["path"]))
+            self._run_toggle(state, has_domains, on_done=self._refresh_custom_domains_card, notify=False)
         else:
             self._refresh_custom_domains_card(state)
 
@@ -397,7 +398,7 @@ class _ParentalCardMixin:
         path = state["path"]
         comment = _comment_for_category(cat)
 
-        if not os.path.exists(path):
+        if target and not os.path.exists(path):
             self._on_toggle_done(state, target, True, None, on_done=on_done, notify=notify)
             return
 

@@ -30,6 +30,14 @@ from ._diagnostics_shared import (
 )
 
 
+def _is_lan_ip(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return False
+    return addr.is_private and not addr.is_loopback and not addr.is_unspecified
+
+
 class DiagnosticsPage(HOTSPage):
     SYSTEM_DOMAINS   = _SYSTEM_DOMAINS
     UPDATE_DOMAINS   = _UPDATE_DOMAINS
@@ -361,6 +369,8 @@ class DiagnosticsPage(HOTSPage):
         self.table.setRowCount(0)
         self._status.setText("")
         real = [dict(e) for e in self.entries if e["enabled"] is True]
+        if self.mode == "existence":
+            real = [e for e in real if not _is_lan_ip(e["ip"])]
         run_id = self._run_id
         start_bg_thread(self._scan, real, run_id)
 

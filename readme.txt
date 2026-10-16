@@ -1,4 +1,4 @@
-HOTS Hosts v2.3
+HOTS Hosts v2.4
 ===============
 
 A desktop application for managing the Windows hosts file.
@@ -52,20 +52,19 @@ MAIN FEATURES
 - Light and dark themes with 5 accent colors
 - Built-in update checker (via GitHub Releases); checks on startup by
   default, can be switched off in Options > About
-- Optional password protection (SHA-256 hash stored machine-wide in the
+- Optional password protection (salted hash stored machine-wide in the
   Registry) - required both to open the app and to uninstall it
 - Raw hosts file editor with syntax highlighting
-- Available in 7 languages: English, Polish, French, German, Spanish,
-  Russian, Portuguese
+- Available in 8 languages: English, Polish, French, German, Spanish,
+  Russian, Portuguese, Italian
 
 
-WHAT'S NEW IN 2.3
+WHAT'S NEW IN 2.4
 -----------------
-- Significantly lower resource usage: the app no longer depends on
-  PySide6-Fluent-Widgets and runs on its own lightweight window and widgets
-- Code optimization throughout the application
-- A fifth accent color
-- Refreshed look and a number of small UI fixes
+- Italian language added: the interface is now available in 8 languages
+- The startup password is now stored as a salted hash (existing passwords
+  keep working and are upgraded the next time you change the password)
+- Minor improvements throughout the application's code
 
 
 PARENTAL CONTROL - KNOWN LIMITATIONS
