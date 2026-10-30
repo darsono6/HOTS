@@ -10,7 +10,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%2864--bit%29-0078D4?logo=windows)](https://github.com/)
 [![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES%20%7C%20PT%20%7C%20RU%20%7C%20IT-brightgreen)](#language-support)
 
-### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
+### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest)
 
 *No account, no subscription, no ads. Just download and run.*
 
@@ -36,11 +36,19 @@ You don't need to understand *how* any of this works to use it — the app walks
 
 ## Getting started
 
-1. **[Download the installer](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)**
+1. **[Download the installer](https://github.com/darsono6/HOTS/releases/latest)**
 2. Double-click it — Windows will ask for Administrator permission (that's normal, the app needs it to edit system files)
 3. Follow the setup wizard — done
 
 **Requires:** Windows 10 or 11, 64-bit.
+
+**Prefer the command line?** Install with [WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
+
+```
+winget install Darsono.HOTSHosts
+```
+
+Update later with `winget upgrade Darsono.HOTSHosts`.
 
 <details>
 <summary><strong>Windows shows a “protected your PC” warning?</strong> — click to expand</summary>
@@ -146,7 +154,7 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 
 <div align="center">
 
-### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest/download/HOTS_Hosts_setup.exe)
+### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest)
 
 *No account, no subscription, no ads.*
 
