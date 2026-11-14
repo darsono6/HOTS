@@ -234,10 +234,10 @@ def _crash_texts(tb: str, log_path):
         from .i18n import T, set_lang, pick_lang
         set_lang(pick_lang(load_settings()))
         return (T("startup_failed_title", app="HOTS Hosts"), T("startup_failed_msg"),
-                T("startup_failed_details", details=tb[:800], path=log_path))
+                T("startup_failed_details", details=tb.strip().splitlines()[-1][:300], path=log_path))
     except Exception:
         return ("HOTS Hosts — Startup Error", "The program failed to start.",
-                f"Error details:\n{tb[:800]}\n\nFull log: {log_path}")
+                f"Error details:\n{tb.strip().splitlines()[-1][:300]}\n\nFull log: {log_path}")
 
 
 def _show_crash(tb: str):

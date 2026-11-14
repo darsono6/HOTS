@@ -78,10 +78,16 @@ class SupportPage(HOTSPage):
         cl.addLayout(card_row)
         cl.addSpacing(12)
 
+        alt_lines = T("sup_alt_contact").split("\n")
+        alt_style = f"color: {DARK['fg2']}; font-size: 8pt; background: transparent;"
+        for extra in alt_lines[:-1]:
+            lbl_top = QLabel(extra)
+            lbl_top.setStyleSheet(alt_style)
+            cl.addWidget(lbl_top)
         alt_row = QHBoxLayout()
         alt_row.setSpacing(6)
-        lbl_alt = QLabel(T("sup_alt_contact"))
-        lbl_alt.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent;")
+        lbl_alt = QLabel(alt_lines[-1])
+        lbl_alt.setStyleSheet(alt_style)
         email_lbl = ClickableLabel(CONTACT_EMAIL)
         email_lbl.setStyleSheet("color: #5599dd; font-size: 8pt; text-decoration: underline; background: transparent;")
         email_lbl.setCursor(Qt.PointingHandCursor)

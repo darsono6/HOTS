@@ -164,7 +164,7 @@ if len(sys.argv) >= 4 and sys.argv[1] == "--uninstall-apply":
 log_path = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts" / "error.log"
 log_path.parent.mkdir(parents=True, exist_ok=True)
 try:
-    _log_mode = "w" if log_path.stat().st_size > 250_000 else "a"
+    _log_mode = "w" if log_path.stat().st_size > 1_000_000 else "a"
 except OSError:
     _log_mode = "a"
 _log = open(log_path, _log_mode, encoding="utf-8", buffering=1)
@@ -196,30 +196,80 @@ def _set_app_user_model_id():
 
 _set_app_user_model_id()
 
-def _low_integrity_security_attributes():
+_k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_adv = ctypes.WinDLL("advapi32", use_last_error=True)
+
+_k32.CreateMutexW.restype = ctypes.c_void_p
+_k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+_k32.OpenEventW.restype = ctypes.c_void_p
+_k32.OpenEventW.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_wchar_p]
+_k32.SetEvent.argtypes = [ctypes.c_void_p]
+_k32.CloseHandle.argtypes = [ctypes.c_void_p]
+_k32.LocalFree.restype = ctypes.c_void_p
+_k32.LocalFree.argtypes = [ctypes.c_void_p]
+_adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+    ctypes.c_wchar_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+]
+_adv.GetSecurityInfo.restype = ctypes.c_ulong
+_adv.GetSecurityInfo.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p),
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+]
+_adv.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+
+
+class _SECURITY_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [
+        ("nLength", ctypes.c_ulong),
+        ("lpSecurityDescriptor", ctypes.c_void_p),
+        ("bInheritHandle", ctypes.c_int),
+    ]
+
+
+_SE_KERNEL_OBJECT = 6
+_OWNER_SECURITY_INFORMATION = 1
+_READ_CONTROL = 0x00020000
+_EVENT_MODIFY_STATE = 0x0002
+_ERROR_ALREADY_EXISTS = 183
+_TRUSTED_OWNER_SIDS = ("S-1-5-32-544", "S-1-5-18")
+_MUTEX_SDDL = "D:(A;;GA;;;SY)(A;;GA;;;BA)"
+
+
+def _mutex_security_attributes():
     try:
-        class SECURITY_ATTRIBUTES(ctypes.Structure):
-            _fields_ = [
-                ("nLength", ctypes.c_ulong),
-                ("lpSecurityDescriptor", ctypes.c_void_p),
-                ("bInheritHandle", ctypes.c_int),
-            ]
-
-        sddl = "D:(A;;GA;;;WD)S:(ML;;NW;;;LW)"
         p_sd = ctypes.c_void_p()
-        ok = ctypes.windll.advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            ctypes.c_wchar_p(sddl), 1, ctypes.byref(p_sd), None
-        )
-        if not ok or not p_sd:
-            return None
-
-        sa = SECURITY_ATTRIBUTES()
-        sa.nLength = ctypes.sizeof(SECURITY_ATTRIBUTES)
+        if not _adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            _MUTEX_SDDL, 1, ctypes.byref(p_sd), None
+        ) or not p_sd:
+            return None, None
+        sa = _SECURITY_ATTRIBUTES()
+        sa.nLength = ctypes.sizeof(_SECURITY_ATTRIBUTES)
         sa.lpSecurityDescriptor = p_sd
         sa.bInheritHandle = False
-        return sa
+        return sa, p_sd
     except Exception:
-        return None
+        return None, None
+
+
+def _object_owner_is_trusted(handle) -> bool:
+    try:
+        owner = ctypes.c_void_p()
+        descriptor = ctypes.c_void_p()
+        if _adv.GetSecurityInfo(handle, _SE_KERNEL_OBJECT, _OWNER_SECURITY_INFORMATION,
+                                ctypes.byref(owner), None, None, None, ctypes.byref(descriptor)) != 0:
+            return False
+        try:
+            sid_text = ctypes.c_wchar_p()
+            if not owner or not _adv.ConvertSidToStringSidW(owner, ctypes.byref(sid_text)):
+                return False
+            try:
+                return sid_text.value in _TRUSTED_OWNER_SIDS
+            finally:
+                _k32.LocalFree(ctypes.cast(sid_text, ctypes.c_void_p))
+        finally:
+            _k32.LocalFree(descriptor)
+    except Exception:
+        return False
 
 
 _MUTEX_NAME = "Global\\HOTS_HostsEditor_SingleInstance_Mutex"
@@ -228,14 +278,21 @@ _mutex_handle = None
 def _acquire_single_instance_lock() -> bool:
     global _mutex_handle
     try:
-        ERROR_ALREADY_EXISTS = 183
-        sa = _low_integrity_security_attributes()
-        sa_arg = ctypes.byref(sa) if sa is not None else None
-        _mutex_handle = ctypes.windll.kernel32.CreateMutexW(sa_arg, False, _MUTEX_NAME)
-        if not _mutex_handle:
-            return False
-        already_running = ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS
-        return not already_running
+        sa, p_sd = _mutex_security_attributes()
+        try:
+            handle = _k32.CreateMutexW(ctypes.byref(sa) if sa is not None else None, False, _MUTEX_NAME)
+            error = ctypes.get_last_error()
+        finally:
+            if p_sd:
+                _k32.LocalFree(p_sd)
+        if not handle:
+            return True
+        if error != _ERROR_ALREADY_EXISTS:
+            _mutex_handle = handle
+            return True
+        trusted = _object_owner_is_trusted(handle)
+        _k32.CloseHandle(handle)
+        return not trusted
     except Exception:
         return True
 
@@ -243,7 +300,7 @@ def release_single_instance_lock():
     global _mutex_handle
     if _mutex_handle:
         try:
-            ctypes.windll.kernel32.CloseHandle(_mutex_handle)
+            _k32.CloseHandle(_mutex_handle)
         except Exception:
             pass
         _mutex_handle = None
@@ -253,17 +310,13 @@ _ACTIVATE_EVENT_NAME = "Global\\HOTS_HostsEditor_ActivateEvent"
 
 def _signal_running_instance() -> bool:
     try:
-        EVENT_MODIFY_STATE = 0x0002
-        SYNCHRONIZE = 0x00100000
-        handle = ctypes.windll.kernel32.OpenEventW(
-            EVENT_MODIFY_STATE | SYNCHRONIZE, False, _ACTIVATE_EVENT_NAME
-        )
+        handle = _k32.OpenEventW(_EVENT_MODIFY_STATE | _READ_CONTROL, False, _ACTIVATE_EVENT_NAME)
         if not handle:
             return False
         try:
-            return bool(ctypes.windll.kernel32.SetEvent(handle))
+            return _object_owner_is_trusted(handle) and bool(_k32.SetEvent(handle))
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            _k32.CloseHandle(handle)
     except Exception:
         return False
 
@@ -346,21 +399,10 @@ def _tr(key: str, fallback: str, **kw) -> str:
 
 _exit_code = 0
 try:
-    if not _acquire_single_instance_lock():
+    if not _is_admin():
         if _signal_running_instance():
             print(f"{_stamp()} already running: activated the existing window", flush=True)
-        else:
-            print(f"{_stamp()} already running: activation event failed, used window focus", flush=True)
-            _focus_existing_instance()
-        sys.exit(0)
-
-    if not _is_admin():
-        if _mutex_handle:
-            try:
-                ctypes.windll.kernel32.CloseHandle(_mutex_handle)
-            except Exception:
-                pass
-            _mutex_handle = None
+            sys.exit(0)
         ok = _relaunch_as_admin()
         if ok:
             print(f"{_stamp()} not admin: relaunched via UAC", flush=True)
@@ -385,6 +427,14 @@ try:
                 print(f"messagebox failed: {e2}", flush=True)
             sys.exit(1)
 
+    if not _acquire_single_instance_lock():
+        if _signal_running_instance():
+            print(f"{_stamp()} already running: activated the existing window", flush=True)
+        else:
+            print(f"{_stamp()} already running: activation event failed, used window focus", flush=True)
+            _focus_existing_instance()
+        sys.exit(0)
+
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
     import PySide6
@@ -404,8 +454,14 @@ except Exception:
         from PySide6.QtWidgets import QApplication, QMessageBox
         app = QApplication.instance() or QApplication(sys.argv)
         m = QMessageBox()
-        m.setWindowTitle(_tr("startup_error_title", "{app} — Error", app="HOTS Hosts"))
-        m.setText(tb[:1000])
+        m.setWindowTitle(_tr("startup_failed_title", "{app} — Startup Error", app="HOTS Hosts"))
+        m.setText(_tr("startup_failed_msg", "The program failed to start."))
+        m.setInformativeText(_tr(
+            "startup_failed_details",
+            "Error details:\n{details}\n\nFull log: {path}",
+            details=traceback.format_exc().strip().splitlines()[-1][:300],
+            path=log_path,
+        ))
         m.exec()
     except Exception as e2:
         print(f"messagebox failed: {e2}", flush=True)

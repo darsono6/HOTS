@@ -101,7 +101,7 @@ class DiagnosticsPage(HOTSPage):
 
     def _card_style(self) -> str:
         return (f"background: {DARK['panel_bg']}; "
-                f"border: 1px solid {DARK['border_faint']}; border-radius: 6px;")
+                f"border: 1px solid {DARK['border_faint']}; border-radius: 8px;")
 
     def _on_diag_col_resized(self, index, old_size, new_size):
         min_widths = getattr(self, "_diag_min_widths", None)

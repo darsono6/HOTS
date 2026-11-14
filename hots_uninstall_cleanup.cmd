@@ -22,7 +22,7 @@ set "AUTH_FILE=%~2"
 set "PS_CHOICES=%CHOICES_FILE:'=''%"
 set "PS_AUTH=%AUTH_FILE:'=''%"
 
-net session >nul 2>&1
+fltmc >nul 2>&1
 if %errorlevel% neq 0 (
     echo [hots_uninstall] Not running as administrator - elevating via UAC... >> "%LOG%"
     powershell -NoProfile -Command "$p = Start-Process -FilePath '%~f0' -ArgumentList '\"%PS_CHOICES%\" \"%PS_AUTH%\"' -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
@@ -39,7 +39,7 @@ if exist "%CHOICES_FILE%" (
 )
 
 echo [hots_uninstall] Applying the choices made in the uninstall wizard... >> "%LOG%"
-"%~dp0HOTS Hosts.exe" --uninstall-apply "%CHOICES_FILE%" "%RESULT_FILE%" "%AUTH_FILE%"
+start "" /wait "%~dp0HOTS Hosts.exe" --uninstall-apply "%CHOICES_FILE%" "%RESULT_FILE%" "%AUTH_FILE%"
 echo [hots_uninstall] Cleanup step finished (exit code !errorlevel!). >> "%LOG%"
 
 set "DELETE_DATA=0"

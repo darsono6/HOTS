@@ -18,6 +18,7 @@ from .constants import HOSTS_PATH, CUSTOM_DOMAINS_PATH
 from .core import list_backups, strip_all_parental_blocks
 from .core_antispy import AntiSpyManager, HostsLockManager
 from .core_appblock import AppBlockManager
+from .core_netblock import NetBlockManager
 from .core_doh import DohBlockManager, BROWSERS as _DOH_BROWSERS
 from .dns_utils import is_cf_family_active, disable_cf_family_dns
 
@@ -183,6 +184,12 @@ def apply_uninstall_choices(choices: dict) -> dict:
         HostsLockManager.disable()
     except Exception as e:
         report["errors"].append(f"hosts_lock: {e}")
+
+    try:
+        if not NetBlockManager.disable():
+            report["errors"].append(f"netblock: {NetBlockManager.last_error}")
+    except Exception as e:
+        report["errors"].append(f"netblock: {e}")
 
     failed_apps = _remove_all_appblocks()
     if failed_apps:

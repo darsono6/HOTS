@@ -36,19 +36,11 @@ You don't need to understand *how* any of this works to use it — the app walks
 
 ## Getting started
 
-1. **[Download the installer](https://github.com/darsono6/HOTS/releases/latest)**
+1. Download the installer from the [Releases page](https://github.com/darsono6/HOTS/releases/latest)
 2. Double-click it — Windows will ask for Administrator permission (that's normal, the app needs it to edit system files)
 3. Follow the setup wizard — done
 
 **Requires:** Windows 10 or 11, 64-bit.
-
-**Prefer the command line?** Install with [WinGet](https://learn.microsoft.com/windows/package-manager/winget/):
-
-```
-winget install Darsono.HOTSHosts
-```
-
-Update later with `winget upgrade Darsono.HOTSHosts`.
 
 <details>
 <summary><strong>Windows shows a “protected your PC” warning?</strong> — click to expand</summary>
@@ -84,6 +76,7 @@ See **[CODE_SIGNING.md](CODE_SIGNING.md)** for full details on why the release i
 - **VPN client blocking** — blocks 10 popular VPN apps that could otherwise be used to bypass the filters
 - **DNS-over-HTTPS blocking** — closes a common loophole where browsers quietly bypass the hosts file for DNS lookups
 - **Block System Restore** — stops someone from using System Restore to undo all the blocks
+- **Internet blocking** — cuts off internet access on the whole PC, over Wi-Fi and cable, while the local network keeps working. It stays on after a restart until you unblock it in the app; set a password in Options so that only someone who knows it can unblock
 
 </details>
 
@@ -133,7 +126,7 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 <details>
 <summary><strong>🎨 Other features</strong> — click to expand</summary>
 
-- Light and dark themes, 5 accent colors, custom window with Mica backdrop on Windows 11
+- Light and dark themes, 6 accent colors, custom window with Mica or Acrylic backdrop and an optional glow on Windows 11
 - 8 languages: English, Polski, Français, Deutsch, Español, Português, Русский, Italiano
 - Optional password protection (required to open the app or uninstall it)
 - Uninstall wizard — choose exactly what to undo (domain blocks, DNS, privacy settings, saved configuration, custom domain list, hosts backups) instead of an all-or-nothing removal
@@ -144,11 +137,17 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 
 ---
 
-## What's new in 2.4
+## What's new in 2.5
 
-- **Italian language added** — the interface is now available in 8 languages
-- **Stronger password storage** — the startup password is now stored as a salted hash (existing passwords keep working and are upgraded the next time you change the password)
-- Minor improvements throughout the application's code
+- **Internet blocking** — a new option for parents on the Parental Protection page: one switch cuts off internet access on the whole computer, over Wi-Fi and cable, while the local network keeps working
+- **New visual effects** — Acrylic material next to Mica, a glow effect with adjustable strength (transparency in Acrylic mode), and a switch to turn window effects off
+- **New accent color** — Graphite joins the existing five, so there are now 6 accent colors
+- **Rebuilt Options page** — expandable cards for Language and Appearance, plus Updates (check for updates on startup, manual check), About and Support
+- **License information** — the About page now opens the full license and the third-party notices
+- **Updates** — clicking an available update now downloads the installer directly, instead of only opening the repository page
+- **Copy diagnostics** — a new button on the About page copies anonymized system and program information to the clipboard, ready to paste into a bug report
+- **Improved blocking of your own domains** — the feature has been reworked to work better
+- Several smaller fixes and improvements throughout the application
 
 ---
 
@@ -198,24 +197,26 @@ hosts_editor_launcher.pyw   # Single-instance guard + admin elevation entry poin
 hosts_editor/
 ├── __main__.py             # Entry point — app startup, password prompt, language init
 ├── app.py                  # Main window — hosts table, toolbar, page navigation
-├── frameless.py             # Custom window shell — title bar, DWM shadow, Mica (Win11), page stack
-├── nav_rail.py               # Side navigation rail
-├── core.py                  # Data logic — parse, save, import/export, DNS, custom domain blocking
+├── frameless.py            # Custom window shell — title bar, DWM shadow, Mica / Acrylic (Win11), page stack
+├── nav_rail.py             # Side navigation rail
+├── core.py                 # Data logic — parse, save, import/export, DNS, custom domain blocking
 ├── core_antispy.py         # Privacy engine — services, firewall rules, tasks, registry tweaks, hosts file lock
-├── core_appblock.py       # Application blocking — IFEO redirection + ACL deny on target executables, VPN client bundle
-├── core_doh.py               # DNS-over-HTTPS blocking — per-browser Group Policy enforcement + drift watchdog
+├── core_appblock.py        # Application blocking — IFEO redirection + ACL deny on target executables, VPN client bundle
+├── core_netblock.py        # Internet blocking — Windows Firewall outbound block rules for public IP ranges + watchdog state
+├── core_doh.py             # DNS-over-HTTPS blocking — per-browser Group Policy enforcement + drift watchdog
 ├── core_restore.py         # System Restore point creation & frequency-limit removal
-├── bg_tasks.py               # Background worker thread registry — joined on app quit to avoid Qt teardown races
-├── constants.py             # Theme colors, accent presets, paths, settings load/save
-├── widgets_qt.py            # Reusable Qt UI components — buttons, dialogs, pages, tooltips
-├── ui_parts.py                # Small widgets — icon widget, toolbar button, progress ring, info banner
-├── icons.py                   # Built-in SVG icon set
+├── bg_tasks.py             # Background worker thread registry — joined on app quit to avoid Qt teardown races
+├── constants.py            # Theme colors, accent presets, paths, settings load/save
+├── widgets_qt.py           # Reusable Qt UI components — buttons, dialogs, pages, tooltips
+├── ui_parts.py             # Small widgets — icon widget, toolbar button, progress ring, info banner
+├── icons.py                # Built-in SVG icon set
 ├── resource_utils.py       # Base-path resolution (dev / frozen / Nuitka builds)
 ├── win_icon.py             # Sets the window/taskbar icon explicitly via WinAPI (no default icon)
-├── dns_utils.py              # DNS management — native interface lookup, Cloudflare Family DNS orchestration
-├── secure_storage.py         # Protected state storage — hardens the ProgramData folder, atomic JSON writes
+├── dns_utils.py            # DNS management — native interface lookup, Cloudflare Family DNS orchestration
+├── password_utils.py       # Password hashing and verification (PBKDF2-SHA256)
+├── secure_storage.py       # Protected state storage — hardens the ProgramData folder, atomic JSON writes
 ├── uninstall_flow.py       # Uninstall cleanup logic — mandatory system-lock teardown + optional, wizard-driven reverts
-├── i18n.py                     # Multilingual string system (EN / PL / FR / DE / ES / PT / RU / IT)
+├── i18n.py                 # Multilingual string system (EN / PL / FR / DE / ES / PT / RU / IT)
 ├── graphic/
 │   ├── logo.png                              # About page logo
 │   ├── logo.ico                                # Window/taskbar icon
@@ -230,22 +231,22 @@ hosts_editor/
 │   └── ...
 └── dialogs/
     ├── entry_dialog.py           # Add / Edit entry form
-    ├── diff_dialog.py             # Diff preview before save
-    ├── backup_page.py           # Backup Manager
-    ├── diagnostics_page.py    # Domain check & malware scan
-    ├── parental_page.py        # Parental Control panel — categories, hosts file lock, app blocking
-    ├── privacy_page.py          # Privacy / telemetry control center — restore point tools, custom domains, tiered tweaks
+    ├── diff_dialog.py            # Diff preview before save
+    ├── backup_page.py            # Backup Manager
+    ├── diagnostics_page.py       # Domain check & malware scan
+    ├── parental_page.py          # Parental Protection panel — categories, hosts file lock, app blocking, internet blocking
+    ├── privacy_page.py           # Privacy / telemetry control center — restore point tools, custom domains, tiered tweaks
     ├── custom_domains_dialog.py  # Editor for the "Block your own domains" free-text list
-    ├── _doh_card.py               # DNS-over-HTTPS blocking card (per-browser toggles + watchdog)
-    ├── _appblock_card.py       # Application / VPN client blocking card
-    ├── export_dialog.py         # Export to .txt / .csv
-    ├── language_dialog.py     # Language selection
-    ├── accent_dialog.py        # Accent color picker
-    ├── support_page.py         # Support / donate window
-    ├── about_page.py            # About & update checker
-    ├── password_dialog.py     # Set / verify startup password
-    ├── uninstall_wizard.py    # Uninstall-time "what should we undo?" wizard (launched by the installer's uninstaller)
-    └── _*.py                        # Shared/internal helpers for the pages above
+    ├── _doh_card.py              # DNS-over-HTTPS blocking card (per-browser toggles + watchdog)
+    ├── _netblock_card.py         # Internet blocking card
+    ├── _appblock_card.py         # Application / VPN client blocking card
+    ├── export_dialog.py          # Export to .txt / .csv
+    ├── options_page.py           # Options — Language, Appearance (theme, accent, window effects), Updates, About, Support
+    ├── support_page.py           # Support / donate window
+    ├── about_page.py             # About & update checker
+    ├── password_dialog.py        # Set / verify startup password
+    ├── uninstall_wizard.py       # Uninstall-time "what should we undo?" wizard (launched by the installer's uninstaller)
+    └── _*.py                     # Shared/internal helpers for the pages above
 ```
 
 </details>
@@ -283,6 +284,12 @@ HOTS Hosts is provided in good faith but **without any warranty**. The author is
 
 ---
 
+## Bug reports
+
+Found a bug? Open an [issue](https://github.com/darsono6/HOTS/issues/new/choose). In the app, open **About → Copy diagnostics** and paste the result into the report — it contains the app and Windows version and the end of the error log (your user name and computer name are replaced). The log may include names of programs or domains mentioned in error messages, so feel free to review it before pasting. The full log is kept at `%APPDATA%\HOTS Hosts\error.log`.
+
+---
+
 ## Security
 
 Found a security issue? Please report it privately rather than opening a public issue — see **[SECURITY.md](SECURITY.md)** for how to report and what's in scope.
@@ -293,7 +300,9 @@ Found a security issue? Please report it privately rather than opening a public 
 
 If HOTS Hosts saves you time or you simply want to say thanks:
 
-<a href="https://ko-fi.com/darsono"><img src="hosts_editor/assets/kofi_badge_dark.png" alt="Support me on Ko-fi" width="200"/></a>
+<p align="center">
+<a href="https://ko-fi.com/darsono"><img src="hosts_editor/assets/kofi_badge_dark.png" alt="Support me on Ko-fi" width="150"/></a>
+</p>
 
 **Website:** [hotstools.com](https://hotstools.com)
 **Ko-fi:** [ko-fi.com/darsono](https://ko-fi.com/darsono)

@@ -22,7 +22,7 @@ Output/
 Thumbs.db
 .DS_Store
 
-# --- App-specific runtime files (nie wersjonujemy własnych ustawień/backupów) ---
+# --- App-specific runtime files ---
 settings.json
 *.log
 backups/

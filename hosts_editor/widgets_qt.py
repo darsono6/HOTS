@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property, QObje
 from PySide6.QtGui import QColor, QPalette, QIcon, QCursor, QPainter, QPen
 
 import shiboken6
-from .constants import DARK, IS_LIGHT_THEME, accent_rgba
+from .constants import DARK, EFFECTS, IS_LIGHT_THEME, accent_rgba
 from .bg_tasks import is_shutting_down, register_wakeup
 from .icons import FIF, AppIcon, make_qicon
 from .ui_parts import IconWidget, IndeterminateProgressRing, TransparentToolButton
@@ -669,11 +669,12 @@ class HOTSDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None, title: str = "HOTS",
                  min_width: int = 340, min_height: int = 200):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground, EFFECTS)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowSystemMenuHint)
         self.setWindowTitle(title)
         self.setMinimumSize(min_width, min_height)
-        self.setStyleSheet("QDialog { background: transparent; }")
+        solid = "#f0f4f9" if IS_LIGHT_THEME else "#202020"
+        self.setStyleSheet(f"QDialog {{ background: {'transparent' if EFFECTS else solid}; }}")
 
         self._title_text = title
         self._build_frame()
@@ -786,7 +787,7 @@ class HOTSDialog(QDialog):
             QTimer.singleShot(300, lambda: win_icon.apply(int(self.winId())))
             _dwm_dark_titlebar(hwnd, dark=not IS_LIGHT_THEME)
             enable_rounded_corners(hwnd)
-            _dwm_mica_dialog(hwnd, dark=not IS_LIGHT_THEME)
+            _dwm_mica_dialog(hwnd, dark=not IS_LIGHT_THEME, backdrop=EFFECTS)
         except Exception:
             pass
 
@@ -897,7 +898,11 @@ class HOTSPage(QWidget):
 
         sep = QFrame()
         sep.setFixedHeight(2)
-        sep.setStyleSheet(f"background-color: {accent_rgba(0.35)}; border: none;")
+        sep.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+            f"stop:0 {accent_rgba(0.90)}, stop:0.55 {accent_rgba(0.35)}, stop:1 {accent_rgba(0.0)}); "
+            "border: none;"
+        )
         root.addWidget(sep)
         root.addSpacing(12)
 
@@ -1223,8 +1228,8 @@ class _CtxRow(QWidget):
             )
         else:
             self.setStyleSheet(
-                f"QWidget#ctxRow {{ background: transparent; border: none; }}"
-                f"QLabel {{ background: transparent; border: none; }}"
+                "QWidget#ctxRow { background: transparent; border: none; }"
+                "QLabel { background: transparent; border: none; }"
             )
             self._lbl.setStyleSheet(
                 f"color: {DARK['fg']}; font-size: 10pt; background: transparent; border: none;"
@@ -1585,7 +1590,7 @@ def _dwm_dark_titlebar(hwnd: int, dark: bool = True) -> None:
     except Exception:
         pass
 
-def _dwm_mica_dialog(hwnd: int, dark: bool = True) -> None:
+def _dwm_mica_dialog(hwnd: int, dark: bool = True, backdrop: bool = True) -> None:
     try:
         import ctypes.wintypes
         _ensure_dwm_argtypes()
@@ -1596,6 +1601,8 @@ def _dwm_mica_dialog(hwnd: int, dark: bool = True) -> None:
             ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(
                 ctypes.wintypes.HWND(hwnd), ctypes.byref(margins)
             )
+            if not backdrop:
+                return
             if build >= 22621:
                 val = ctypes.c_int(2)
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(

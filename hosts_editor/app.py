@@ -22,11 +22,11 @@ from PySide6.QtGui import (
 )
 
 from .icons import FIF
-from .ui_parts import InfoBanner, IndeterminateProgressRing
+from .ui_parts import InfoBanner, IndeterminateProgressRing, TransparentToolButton
 from .nav_rail import NavRail
 from .frameless import FramelessWindow
 
-from .constants import DARK, DEFAULT_ACCENT, HOSTS_PATH, accent_rgba, load_settings, save_settings
+from .constants import DARK, HOSTS_PATH, accent_rgba, load_settings, save_settings, set_live_glow, set_live_transparency, updates_on_startup
 from .i18n import T, set_lang, current_lang, pick_lang
 from .core import (
     parse_hosts, save_hosts, entries_to_text,
@@ -34,13 +34,14 @@ from .core import (
     HostsBusyError, _looks_like_malformed_entry, _looks_like_entry, parental_broken_keys,
 )
 from .core_antispy import HostsLockManager
+from .core_netblock import NetBlockManager
 from .core_appblock import AppBlockManager
 from .core_doh import DohBlockManager
 from .bg_tasks import start_bg_thread, is_shutting_down, register_qthread, register_wakeup
 from .widgets_qt import (
     HOTSButton, HOTSDialog, enable_rounded_corners, HOTSContextMenu,
     attach_line_edit_context_menu, attach_text_edit_context_menu,
-    make_folder_button, colored_svg_icon, SmoothWheel,
+    make_folder_button, colored_svg_icon, SmoothWheel, attach_fluent_tip,
 )
 
 _ACCENT_GOLD = QColor(DARK["accent"])
@@ -70,7 +71,7 @@ _advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
     ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.wintypes.ULONG),
 ]
 
-def _low_integrity_security_attributes():
+def _activation_event_security_attributes():
     try:
         class SECURITY_ATTRIBUTES(ctypes.Structure):
             _fields_ = [
@@ -79,7 +80,7 @@ def _low_integrity_security_attributes():
                 ("bInheritHandle", ctypes.c_int),
             ]
 
-        sddl = "D:(A;;GA;;;WD)S:(ML;;NW;;;LW)"
+        sddl = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x20002;;;WD)S:(ML;;NW;;;ME)"
         p_sd = ctypes.c_void_p()
         ok = _advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
             sddl, 1, ctypes.byref(p_sd), None
@@ -97,7 +98,7 @@ def _low_integrity_security_attributes():
 
 def _parse_saved_geometry(geo_str: str):
 
-    m = re.match(r"^(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?$", geo_str or "")
+    m = re.match(r"^(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?$", geo_str if isinstance(geo_str, str) else "")
     if not m:
 
         return 900, 650, None, None
@@ -290,10 +291,16 @@ class _AntiSpyWatchdogSignals(QObject):
 class _HostsLockWatchdogSignals(QObject):
     done = Signal(object)
 
+class _HostsLockToggleSignals(QObject):
+    done = Signal(bool, bool)
+
 class _AppBlockWatchdogSignals(QObject):
     done = Signal(object)
 
 class _DohWatchdogSignals(QObject):
+    done = Signal(object)
+
+class _NetBlockWatchdogSignals(QObject):
     done = Signal(object)
 
 class _ExternalActivateSignals(QObject):
@@ -365,9 +372,6 @@ class HostsEditor(FramelessWindow):
 
         self._page_route_map: dict = {}
 
-        self._options_menu = None
-        self._options_menu_was_open = False
-
         self.setWindowTitle("HOTS Hosts")
         w, h, x, y = _parse_saved_geometry(self._settings.get("geometry", ""))
         self.resize(w, h)
@@ -412,7 +416,8 @@ class HostsEditor(FramelessWindow):
         QTimer.singleShot(1500, self._check_hosts_lock_watchdog)
         QTimer.singleShot(1500, self._check_appblock_watchdog)
         QTimer.singleShot(1500, self._check_doh_watchdog)
-        if str(self._settings.get("check_updates_on_startup", "1")).strip().lower() in ("1", "true", "yes"):
+        QTimer.singleShot(1500, self._check_netblock_watchdog)
+        if updates_on_startup(self._settings):
             QTimer.singleShot(2500, self._check_updates_silently)
 
         try:
@@ -432,7 +437,7 @@ class HostsEditor(FramelessWindow):
             handle = None
             p_sd = None
             try:
-                sa, p_sd = _low_integrity_security_attributes()
+                sa, p_sd = _activation_event_security_attributes()
                 sa_arg = ctypes.byref(sa) if sa is not None else None
                 handle = _k32.CreateEventW(
                     sa_arg, False, False, _EXTERNAL_ACTIVATE_EVENT_NAME
@@ -669,20 +674,19 @@ class HostsEditor(FramelessWindow):
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
-    def _on_startup_update_check_ok(self, tag: str, url: str):
+    def _on_startup_update_check_ok(self, tag: str, url: str, asset):
         if is_shutting_down() or not shiboken6.isValid(self):
             return
         from .dialogs._about_shared import _parse_version, APP_VERSION
         if _parse_version(tag) > _parse_version(APP_VERSION):
-            self._show_update_available_hud(tag, url)
-            about_page = getattr(self, "_about_page", None)
-            if about_page is not None and shiboken6.isValid(about_page):
-                about_page.apply_known_update(tag, url)
+            self._show_update_available_hud(tag)
+            options_page = getattr(self, "_options_page", None)
+            if options_page is not None and shiboken6.isValid(options_page):
+                options_page.apply_known_update(tag, url, asset)
 
-    def _show_update_available_hud(self, tag: str, url: str):
+    def _show_update_available_hud(self, tag: str):
         self._dismiss_update_hud()
-        self._update_release_url = url
-        self._update_infobar = InfoBanner.info(
+        banner = InfoBanner.info(
             title=T("update_hud_title"),
             content=T("update_hud_msg", version=tag),
             orient=Qt.Horizontal,
@@ -690,6 +694,13 @@ class HostsEditor(FramelessWindow):
             duration=-1,
             parent=self,
         )
+        banner.set_clickable()
+        banner.clicked.connect(self._open_options_from_update_hud)
+        self._update_infobar = banner
+
+    def _open_options_from_update_hud(self):
+        self._dismiss_update_hud()
+        self._nav(self._open_options, "options")()
 
     def _dismiss_update_hud(self):
         ib = getattr(self, "_update_infobar", None)
@@ -717,14 +728,16 @@ class HostsEditor(FramelessWindow):
         if is_shutting_down():
             return
         try:
-            if result is not None:
-                self._refresh_toolbar_status_ui()
-                page = getattr(self, "_parental_page", None)
-                if page is not None and hasattr(page, "apply_hosts_lock_drift_result"):
-                    try:
-                        page.apply_hosts_lock_drift_result(result)
-                    except Exception as e:
-                        print(f"Hosts lock watchdog warning: {e}")
+            self._refresh_toolbar_status_ui()
+            if result == "regressed":
+                self._lock_note = T("hosts_lock_drift_regressed")
+            elif result == "restored":
+                self._lock_note = T("hosts_lock_drift_restored")
+            self._refresh_lock_icon()
+        except Exception as e:
+            print(f"Hosts lock watchdog warning: {e}")
+
+        try:
             if result == "regressed":
                 InfoBanner.warning(
                     title=T("hosts_lock_watchdog_title"),
@@ -822,6 +835,50 @@ class HostsEditor(FramelessWindow):
         except Exception as e:
             print(f"DoH watchdog warning: {e}")
 
+    def _check_netblock_watchdog(self):
+        signals = _NetBlockWatchdogSignals(self)
+        signals.done.connect(self._on_netblock_watchdog_checked)
+        self._netblock_watchdog_signals = signals
+        self._track_bg_signal(signals)
+
+        def worker():
+            try:
+                result = NetBlockManager.check_drift()
+            except Exception as e:
+                print(f"Internet block watchdog warning: {e}")
+                result = None
+            signals.done.emit(result)
+
+        start_bg_thread(worker)
+
+    def _on_netblock_watchdog_checked(self, result):
+        if is_shutting_down() or result is None:
+            return
+        try:
+            page = getattr(self, "_parental_page", None)
+            if page is not None and hasattr(page, "apply_netblock_drift_result"):
+                page.apply_netblock_drift_result(result)
+            if result == "regressed":
+                InfoBanner.warning(
+                    title=T("netblock_watchdog_title"),
+                    content=T("netblock_drift_regressed"),
+                    orient=Qt.Vertical,
+                    closable=True,
+                    duration=-1,
+                    parent=self,
+                )
+            elif result == "restored":
+                InfoBanner.info(
+                    title=T("netblock_watchdog_title"),
+                    content=T("netblock_drift_restored"),
+                    orient=Qt.Vertical,
+                    closable=True,
+                    duration=5000,
+                    parent=self,
+                )
+        except Exception as e:
+            print(f"Internet block watchdog warning: {e}")
+
     def _reapply_antispy_drift(self, drifted_items: list, bar):
         from .core_antispy import AntiSpyManager
 
@@ -892,8 +949,7 @@ class HostsEditor(FramelessWindow):
         p = resource_path(name)
         return p if os.path.exists(p) else ""
 
-    _RAIL_KEYS = {"mainWidget": "home", "about": "options", "support": "options",
-                 "password": "options", "language": "options", "theme": "options"}
+    _RAIL_KEYS = {"mainWidget": "home", "about": "options", "support": "options", "options": "options"}
 
     def _sync_rail(self):
         widget = self.stackedWidget.currentWidget()
@@ -911,9 +967,9 @@ class HostsEditor(FramelessWindow):
         def _wrapper():
             def _deferred():
                 fn()
-                # Always refresh the rail: actions without a route_key (password/language/theme)
-                # only open a dialog and stay on the same page. Register a new route only when
-                # route_key is set, so those actions cannot overwrite the current page's route.
+                # Always refresh the rail: actions without a route_key only open a dialog and stay
+                # on the same page. Register a new route only when route_key is set, so those
+                # actions cannot overwrite the current page's route.
                 current = self.stackedWidget.currentWidget()
                 if route_key and current is not None and current is not self._main_widget:
                     self._page_route_map[current.objectName()] = route_key
@@ -942,43 +998,9 @@ class HostsEditor(FramelessWindow):
         rail.add_tile("parental",  FIF.PEOPLE,  T("btn_parental"),   on_click=self._nav(self._open_parental_control, "parental"))
         rail.add_tile("privacy",   FIF.HIDE,    T("btn_privacy"),    on_click=self._nav(self._open_privacy, "privacy"))
 
-        options_tile = rail.add_tile("options", FIF.SETTING, T("btn_options"),
-                                     on_click=self._on_options_clicked, bottom=True)
-        # The menu already closes on MouseButtonPress (app-level filter),
-        # so onClick must not reopen it immediately.
-        options_tile.pressed.connect(self._remember_options_menu_state)
+        rail.add_tile("options", FIF.SETTING, T("btn_options"),
+                      on_click=self._nav(self._open_options, "options"), bottom=True)
         rail.set_current("home")
-
-    def _remember_options_menu_state(self):
-        menu = self._options_menu
-        self._options_menu_was_open = bool(
-            menu is not None and shiboken6.isValid(menu) and menu.isVisible()
-        )
-
-    def _on_options_clicked(self):
-        if self._options_menu_was_open:
-            self._options_menu_was_open = False
-            return
-        try:
-            from .__main__ import _reg_get_password
-            has_password = bool(_reg_get_password())
-        except Exception:
-            has_password = False
-        items = [
-            ("\u2139",     DARK["fg2"],    T("opt_about"),      self._nav(self._about, "about")),
-            ("\u2665",     DARK["red"],    T("opt_support"),    self._nav(self._support, "support")),
-            ("\U0001F512", "#e0b040",      T("opt_pass_on") if has_password else T("opt_pass_off"),
-                                                                 self._nav(self._manage_password)),
-            None,
-            ("\U0001F310", "#60c8ff",      T("opt_language"),   self._nav(self._change_language)),
-            ("\U0001F3A8", DARK["accent"], T("opt_appearance"), self._nav(self._change_accent_color)),
-        ]
-        menu = HOTSContextMenu(self, items)
-        self._options_menu = menu
-        menu.adjustSize()
-        tile = self._rail.tile("options")
-        anchor = tile.mapToGlobal(QPoint(tile.width(), tile.height()))
-        menu.popup(QPoint(anchor.x() + 4, anchor.y() - menu.height()))
 
     def _build_main_view(self):
         self._main_widget = QWidget()
@@ -1047,6 +1069,22 @@ class HostsEditor(FramelessWindow):
         from .dialogs import AboutPage
         self._about_page = AboutPage(self)
         self.stackedWidget.addWidget(self._about_page)
+
+        from .dialogs import OptionsPage
+        self._options_page = OptionsPage(
+            self,
+            on_about=self._nav(self._about, "about"),
+            on_support=self._nav(self._support, "support"),
+            on_language=self._change_language,
+            on_appearance=lambda values: self._save_settings_merged(**values),
+            on_live_glow=self._apply_live_glow,
+            on_live_transparency=self._apply_live_transparency,
+            on_table_text_accent=self._set_table_text_accent,
+            on_restart=self._restart_app,
+            get_password_hash=self._get_password_hash,
+            set_password_hash=self._set_password_hash,
+        )
+        self.stackedWidget.addWidget(self._options_page)
 
         self.stackedWidget.currentChanged.connect(self._on_stack_changed)
 
@@ -1345,7 +1383,7 @@ class HostsEditor(FramelessWindow):
 
         self.table.setStyleSheet(
             f"QTableView {{ background-color: {DARK['table_bg']}; alternate-background-color: {DARK['table_alt_bg']}; "
-            f"color: {DARK['fg']}; gridline-color: {DARK['grid_line']}; border: 1px solid {DARK['border_soft']}; border-radius: 6px; "
+            f"color: {DARK['fg']}; gridline-color: {DARK['grid_line']}; border: 1px solid {DARK['border_soft']}; border-radius: 8px; "
             f"selection-background-color: transparent; selection-color: {DARK['fg']}; "
             f"font-family: 'Segoe UI'; font-size: 11pt; }}"
             f"QTableView::item {{ border-left: none; border-right: none; border-top: none; "
@@ -1485,7 +1523,7 @@ class HostsEditor(FramelessWindow):
 
     def _build_raw_view(self) -> QWidget:
         wrapper = QWidget()
-        wrapper.setStyleSheet(f"background: transparent; border: none;")
+        wrapper.setStyleSheet("background: transparent; border: none;")
         lay = QVBoxLayout(wrapper)
 
         lay.setContentsMargins(0, 0, 0, 0)
@@ -1522,7 +1560,7 @@ class HostsEditor(FramelessWindow):
         SmoothWheel(self._raw_editor)
         self._raw_editor.setStyleSheet(
             f"QTextEdit {{ background-color: {DARK['table_bg']}; color: {DARK['fg']}; "
-            f"border: 1px solid {DARK['border_soft']}; border-radius: 6px; "
+            f"border: 1px solid {DARK['border_soft']}; border-radius: 8px; "
             f"padding: 8px 10px; font-size: 11pt; }}"
             f"QTextEdit:focus {{ border: 1px solid {DARK['accent']}; }}"
 
@@ -1652,6 +1690,16 @@ class HostsEditor(FramelessWindow):
         )
         lay.addWidget(self.status_bar, 1)
 
+        self._lock_busy = False
+        self._lock_note = ""
+        self._lock_btn = TransparentToolButton(FIF.LOCK, bar)
+        self._lock_btn.setFixedSize(28, 28)
+        self._lock_btn.setIconSize(QSize(16, 16))
+        self._lock_btn.setCursor(Qt.PointingHandCursor)
+        self._lock_btn.clicked.connect(self._toggle_hosts_lock)
+        lay.addWidget(self._lock_btn)
+        self._refresh_lock_icon()
+
         search_frame = QFrame()
         search_frame.setObjectName("statusSearch")
         search_frame.setFixedHeight(34)
@@ -1727,6 +1775,64 @@ class HostsEditor(FramelessWindow):
 
         lay.addWidget(search_frame)
         return bar
+
+    def _refresh_lock_icon(self):
+        btn = getattr(self, "_lock_btn", None)
+        if btn is None or not shiboken6.isValid(btn):
+            return
+        active = HostsLockManager.is_active()
+        btn.setIcon(colored_svg_icon(FIF.LOCK if active else FIF.UNLOCK,
+                                     QColor(DARK["green"] if active else DARK["fg2"]), sizes=(16,)))
+        btn.setEnabled(not self._lock_busy)
+        lines = [
+            T("hosts_lock_title"),
+            T("hosts_lock_status_locked" if active else "hosts_lock_status_unlocked"),
+            "",
+            T("hosts_lock_tooltip"),
+            "",
+            T("hosts_lock_click", a=T("hosts_lock_btn_disable" if active else "hosts_lock_btn_enable")),
+        ]
+        if self._lock_note:
+            lines += ["", self._lock_note]
+        attach_fluent_tip(btn, "\n".join(lines), width=280)
+
+    def _toggle_hosts_lock(self):
+        if self._lock_busy:
+            return
+        target = not HostsLockManager.is_active()
+        self._lock_busy = True
+        self._lock_note = ""
+        self._refresh_lock_icon()
+
+        signals = _HostsLockToggleSignals(self)
+        signals.done.connect(self._on_hosts_lock_toggled)
+        self._track_bg_signal(signals)
+
+        def worker(t=target):
+            try:
+                ok = HostsLockManager.enable() if t else HostsLockManager.disable()
+            except Exception as e:
+                ok = False
+                HostsLockManager.last_error = str(e)
+            signals.done.emit(t, ok)
+
+        if start_bg_thread(worker) is None:
+            self._lock_busy = False
+            self._refresh_lock_icon()
+
+    def _on_hosts_lock_toggled(self, target: bool, ok: bool):
+        if is_shutting_down():
+            return
+        self._lock_busy = False
+        self._refresh_lock_icon()
+        self._refresh_toolbar_status_ui()
+        if ok:
+            HOTSDialog.info(self, T("hosts_lock_title"), T("hosts_lock_on_ok" if target else "hosts_lock_off_ok"))
+        else:
+            msg = T("hosts_lock_on_fail" if target else "hosts_lock_off_fail")
+            if HostsLockManager.last_error:
+                msg += f"\n\n{HostsLockManager.last_error}"
+            HOTSDialog.error(self, T("hosts_lock_title"), msg)
 
     def _open_hosts_folder(self):
         import subprocess
@@ -2415,52 +2521,26 @@ class HostsEditor(FramelessWindow):
     def _about(self):
         self.switchTo(self._about_page)
 
-    def _change_language(self):
-        from .dialogs import LanguageDialog
-        dlg = LanguageDialog(self)
-        dlg.exec()
-        if dlg.chosen and dlg.chosen != current_lang():
-            set_lang(dlg.chosen)
-            self._save_settings_merged(language=dlg.chosen)
+    def _open_options(self):
+        self.switchTo(self._options_page)
+
+    def _change_language(self, code: str):
+        if code and code != current_lang():
+            set_lang(code)
+            self._save_settings_merged(language=code)
             HOTSDialog.info(self, T("lang_title"), T("lang_restart_msg"))
 
-    def _change_accent_color(self):
-        from .dialogs import AccentColorDialog
-        current_accent = self._settings.get("accent_color", DEFAULT_ACCENT)
-        current_theme = self._settings.get("theme", "dark")
-        current_table_text_accent = bool(self._settings.get("table_text_accent", False))
-        dlg = AccentColorDialog(self, current_accent=current_accent, current_theme=current_theme,
-                                 current_table_text_accent=current_table_text_accent)
-        dlg.exec()
-        if dlg.chosen_accent is None and dlg.chosen_theme is None and dlg.chosen_table_text_accent is None:
-            return
-        theme_changed = (
-            (dlg.chosen_accent and dlg.chosen_accent != current_accent) or
-            (dlg.chosen_theme and dlg.chosen_theme != current_theme)
-        )
-        table_text_accent_changed = (
-            dlg.chosen_table_text_accent is not None
-            and dlg.chosen_table_text_accent != current_table_text_accent
-        )
-        if not (theme_changed or table_text_accent_changed):
-            return
+    def _apply_live_glow(self, value: int):
+        set_live_glow(value)
+        self.refresh_live_appearance()
 
-        self._save_settings_merged(
-            accent_color=dlg.chosen_accent or current_accent,
-            theme=dlg.chosen_theme or current_theme,
-            table_text_accent=dlg.chosen_table_text_accent
-            if dlg.chosen_table_text_accent is not None else current_table_text_accent,
-        )
+    def _apply_live_transparency(self, value: int):
+        set_live_transparency(value)
+        self.refresh_live_appearance()
 
-        if theme_changed:
-
-            if HOTSDialog.restart_prompt(self, T("app_title"), T("app_restart_msg")):
-                self._restart_app()
-                return
-
-        if table_text_accent_changed:
-
-            self.table.viewport().update()
+    def _set_table_text_accent(self, enabled: bool):
+        self._save_settings_merged(table_text_accent=bool(enabled))
+        self.table.viewport().update()
 
     def _restart_app(self):
 
@@ -2497,8 +2577,12 @@ class HostsEditor(FramelessWindow):
             if is_frozen:
                 ok = QProcess.startDetached(python, args)
             else:
+                launcher_mod = sys.modules.get("__main__")
+                launcher_file = getattr(launcher_mod, "__file__", None)
                 pkg = (__package__ or "").split(".")[0]
-                if pkg:
+                if launcher_file and callable(getattr(launcher_mod, "release_single_instance_lock", None)):
+                    ok = QProcess.startDetached(python, [os.path.abspath(launcher_file)] + args)
+                elif pkg:
                     ok = QProcess.startDetached(python, ["-m", pkg] + args)
                 else:
                     ok = QProcess.startDetached(python, sys.argv)
@@ -2513,16 +2597,13 @@ class HostsEditor(FramelessWindow):
             return
         QApplication.quit()
 
-    def _manage_password(self):
-        from .__main__ import _reg_get_password, _reg_set_password
-        from .dialogs import SetPasswordDialog
-        current_hash = _reg_get_password()
+    def _get_password_hash(self) -> str:
+        from .__main__ import _reg_get_password
+        return _reg_get_password()
 
-        def on_save(new_hash: str):
-            _reg_set_password(new_hash)
-
-        dlg = SetPasswordDialog(self, current_hash, on_save)
-        dlg.exec()
+    def _set_password_hash(self, hash_value: str) -> bool:
+        from .__main__ import _reg_set_password
+        return bool(_reg_set_password(hash_value))
 
     def _disconnect_bg_signals(self):
         for sig in self._bg_signal_objs:

@@ -11,11 +11,11 @@ from ..icons import FIF
 from ..ui_parts import IconWidget, TransparentToolButton
 from ..constants import DARK
 from ..core import toggle_parental_control, get_parental_active_map, HostsBusyError
-from ..core_antispy import HostsLockError, HostsLockManager
+from ..core_antispy import HostsLockError
 from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, h_separator, attach_fluent_tip, make_folder_button, colored_svg_icon, SmoothWheel, EqualHeight
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
-from ..dns_utils import is_cf_family_active, get_cf_status, format_dns_status, enable_cf_family_dns, disable_cf_family_dns
+from ..dns_utils import is_cf_family_active, get_cf_status, format_dns_status, enable_cf_family_dns, disable_cf_family_dns, has_dns_backup
 
 from ._parental_shared import (
     CATEGORIES, _CATEGORY_COMMENT, _CF_ACCENT, _blocklists_dir,
@@ -23,13 +23,11 @@ from ._parental_shared import (
 )
 from ._appblock_card import _AppBlockCardMixin
 from ._doh_card import _DohBlockCardMixin
+from ._netblock_card import _NetBlockCardMixin
 
 
 class _CfDnsToggleSignals(QObject):
     done = Signal(dict)
-
-class _HostsLockToggleSignals(QObject):
-    done = Signal(bool)
 
 class _CfDnsStatusSignals(QObject):
     done = Signal(bool, str)
@@ -48,7 +46,7 @@ def _clear_layout(layout):
                 _clear_layout(child_layout)
 
 
-class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, HOTSPage):
+class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, _NetBlockCardMixin, HOTSPage):
     _refresh_on_show = False
 
     def __init__(self, parent=None):
@@ -110,9 +108,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         inner_lay.setContentsMargins(12, 10, 12, 10)
         inner_lay.setSpacing(6)
 
-        hosts_lock_card = self._make_hosts_lock_card()
-        self._hosts_lock_card = hosts_lock_card
-        inner_lay.addWidget(hosts_lock_card)
+        inner_lay.addWidget(self._make_netblock_card())
         inner_lay.addSpacing(6)
         inner_lay.addWidget(self._make_cf_card())
         inner_lay.addSpacing(6)
@@ -129,7 +125,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         scroll.setWidget(inner)
         rl.addWidget(scroll, 1)
 
-        self._height_sync = EqualHeight(hosts_lock_card, [
+        self._height_sync = EqualHeight(self._netblock_card_widget, [
             w for w in (
                 getattr(self, "_cf_card_widget", None),
                 getattr(self, "_appblock_header", None),
@@ -137,145 +133,6 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
                 getattr(self, "_categories_header", None),
             ) if w is not None and shiboken6.isValid(w)
         ])
-
-    def _make_hosts_lock_card(self) -> QWidget:
-        active = HostsLockManager.is_active()
-        outer = QWidget()
-        outer.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
-        )
-        h = QHBoxLayout(outer)
-        h.setContentsMargins(16, 14, 16, 14)
-        h.setSpacing(10)
-
-        icon = IconWidget(FIF.CERTIFICATE)
-        icon.setFixedSize(20, 20)
-        icon.setIcon(colored_svg_icon(FIF.CERTIFICATE, QColor(DARK["accent"]), sizes=(20,)))
-        h.addWidget(icon, 0, Qt.AlignTop)
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(2)
-
-        title_row = QHBoxLayout()
-        title_row.setSpacing(6)
-        title = QLabel(T("hosts_lock_title"))
-        title.setStyleSheet(f"color: {DARK['fg']}; font-size: 12pt; background: transparent; border: none;")
-        title_row.addWidget(title)
-        title_row.addWidget(_InfoButton(T("hosts_lock_tooltip")))
-        title_row.addStretch()
-        text_col.addLayout(title_row)
-
-        desc = QLabel(T("hosts_lock_desc"))
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent; border: none;")
-        text_col.addWidget(desc)
-
-        status_lbl = QLabel(T("hosts_lock_status_locked") if active else T("hosts_lock_status_unlocked"))
-        status_lbl.setStyleSheet(
-            f"color: {DARK['green'] if active else DARK['fg2']}; font-size: 8.5pt; background: transparent; border: none;"
-        )
-        text_col.addWidget(status_lbl)
-        h.addLayout(text_col, 1)
-
-        side_col = QVBoxLayout()
-        side_col.setSpacing(4)
-        side_col.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
-        btn_color = DARK["green"] if active else DARK["gray"]
-        btn_label = T("hosts_lock_btn_disable") if active else T("hosts_lock_btn_enable")
-        btn_icon = FIF.ACCEPT if active else FIF.CLOSE
-        btn = HOTSButton(btn_icon, btn_color, "", accent=False)
-        btn.setFixedWidth(44)
-        attach_fluent_tip(btn, btn_label)
-        side_col.addWidget(btn, 0, Qt.AlignRight)
-
-        h.addLayout(side_col)
-
-        state = {
-            "active": active, "btn": btn, "status_lbl": status_lbl,
-            "busy": False,
-        }
-        self._hosts_lock_state = state
-        btn.clicked.connect(lambda _c=False, s=state: self._toggle_hosts_lock(s))
-
-        return outer
-
-    def _toggle_hosts_lock(self, state: dict):
-        if state["busy"]:
-            return
-        target = not state["active"]
-        state["busy"] = True
-
-        btn = state["btn"]
-        btn.setEnabled(False)
-        self.begin_busy()
-
-        signals = _HostsLockToggleSignals(self)
-        signals.done.connect(lambda ok, s=state, t=target: self._on_hosts_lock_toggle_done(s, t, ok))
-        self._hosts_lock_signals = signals
-
-        def worker(t=target):
-            try:
-                ok = HostsLockManager.enable() if t else HostsLockManager.disable()
-            except Exception as e:
-                ok = False
-                HostsLockManager.last_error = str(e)
-            signals.done.emit(ok)
-
-        start_bg_thread(worker)
-
-    def _on_hosts_lock_toggle_done(self, state: dict, target: bool, ok: bool):
-        if not shiboken6.isValid(self) or is_shutting_down():
-            return
-        state["busy"] = False
-        btn = state["btn"]
-        btn.setEnabled(True)
-        self.end_busy()
-
-        if ok:
-            state["active"] = target
-            self._refresh_hosts_lock_card(state)
-            if self._parent_win and hasattr(self._parent_win, "_refresh_toolbar_status_ui"):
-                self._parent_win._refresh_toolbar_status_ui()
-            msg_key = "hosts_lock_on_ok" if target else "hosts_lock_off_ok"
-            HOTSDialog.info(self, T("hosts_lock_title"), T(msg_key))
-        else:
-            self._refresh_hosts_lock_card(state)
-            err_msg = T("hosts_lock_on_fail") if target else T("hosts_lock_off_fail")
-            if HostsLockManager.last_error:
-                err_msg += f"\n\n{HostsLockManager.last_error}"
-            HOTSDialog.error(self, T("hosts_lock_title"), err_msg)
-
-    def _refresh_hosts_lock_card(self, state: dict):
-        active = state["active"]
-        btn = state["btn"]
-        attach_fluent_tip(btn, T("hosts_lock_btn_disable") if active else T("hosts_lock_btn_enable"))
-        btn.set_icon(FIF.ACCEPT if active else FIF.CLOSE, DARK["green"] if active else DARK["gray"])
-        btn.set_accent(False)
-
-        status_lbl = state["status_lbl"]
-        status_lbl.setText(T("hosts_lock_status_locked") if active else T("hosts_lock_status_unlocked"))
-        status_lbl.setStyleSheet(
-            f"color: {DARK['green'] if active else DARK['fg2']}; font-size: 8.5pt; background: transparent; border: none;"
-        )
-
-    def apply_hosts_lock_drift_result(self, result):
-        if not shiboken6.isValid(self) or is_shutting_down():
-            return
-        state = getattr(self, "_hosts_lock_state", None)
-        if not state or result is None:
-            return
-        state["active"] = HostsLockManager.is_active()
-        self._refresh_hosts_lock_card(state)
-
-        if result == "regressed":
-            status_lbl = state["status_lbl"]
-            status_lbl.setText(T("hosts_lock_drift_regressed"))
-            status_lbl.setStyleSheet(f"color: {DARK['red']}; font-size: 8.5pt; background: transparent; border: none;")
-        elif result == "restored":
-            status_lbl = state["status_lbl"]
-            status_lbl.setText(T("hosts_lock_drift_restored"))
-            status_lbl.setStyleSheet(f"color: {DARK['green']}; font-size: 8.5pt; background: transparent; border: none;")
 
     def _make_cf_card(self, height: int = 64) -> QWidget:
         active = getattr(self, "_cf_active", False)
@@ -348,7 +205,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
         shown = text or "\u2026"
         full = f"DNS: {shown}"
         lbl.setText(full if len(full) <= 90 else full[:89] + "\u2026")
-        lbl.setToolTip(full)
+        attach_fluent_tip(lbl, full, width=360)
 
     def _on_cf_refresh_clicked(self):
         if getattr(self, "_toggle_op_active", False):
@@ -456,6 +313,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
                 if enable:
                     res["ok"], res["failed"] = enable_cf_family_dns()
                 else:
+                    res["no_backup"] = not has_dns_backup()
                     res["ok"], res["failed"] = disable_cf_family_dns()
             except Exception:
                 res["ok"], res["failed"] = False, []
@@ -509,7 +367,7 @@ class ParentalPage(_ParentalCardMixin, _AppBlockCardMixin, _DohBlockCardMixin, H
                 HOTSDialog.error(self, T("par_cf_title"), T("par_cf_on_fail"))
         else:
             if ok:
-                msg = T("par_cf_off_ok")
+                msg = T("par_cf_off_ok_no_backup" if res.get("no_backup") else "par_cf_off_ok")
                 if failed:
                     msg += "\n" + T("par_cf_partial_fail", ifaces=", ".join(failed))
                 HOTSDialog.info(self, T("par_cf_title"), msg)

@@ -172,14 +172,14 @@ def set_dns_for_interface(iface: str, servers: list[str]) -> bool:
         else:
             subprocess.check_call(
                 [NETSH_EXE, "interface", "ip", "set", "dns",
-                 f"name={iface}", "static", servers[0], "primary"],
+                 f"name={iface}", "static", servers[0], "primary", "validate=no"],
                 creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             for idx, srv in enumerate(servers[1:], start=2):
                 subprocess.check_call(
                     [NETSH_EXE, "interface", "ip", "add", "dns",
-                     f"name={iface}", srv, f"index={idx}"],
+                     f"name={iface}", srv, f"index={idx}", "validate=no"],
                     creationflags=CREATE_NO_WINDOW, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
@@ -265,6 +265,10 @@ def _load_dns_backup() -> dict | None:
         except Exception:
             pass
     return data
+
+
+def has_dns_backup() -> bool:
+    return _load_dns_backup() is not None
 
 
 def _delete_dns_backup() -> None:

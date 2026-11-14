@@ -265,6 +265,7 @@ class _BannerIcon(QWidget):
 
 class InfoBanner(QFrame):
     closedSignal = Signal()
+    clicked = Signal()
 
     MARGIN_TOP = 24
     SPACING = 16
@@ -282,6 +283,7 @@ class InfoBanner(QFrame):
         self._duration = duration
         self._shown_once = False
         self._closing = False
+        self._clickable = False
 
         light = IS_LIGHT_THEME
         dark_bg, light_bg, _icon, _dc, _lc = _BANNER_KINDS[self._kind]
@@ -348,6 +350,23 @@ class InfoBanner(QFrame):
         align = Qt.AlignTop if self._orient == Qt.Vertical else Qt.AlignVCenter
         self._widget_lay.addWidget(widget, stretch, Qt.AlignLeft | align)
         self._adjust_text()
+
+    def set_clickable(self, clickable: bool = True):
+        self._clickable = clickable
+        self.setCursor(Qt.PointingHandCursor if clickable else Qt.ArrowCursor)
+
+    def mousePressEvent(self, e):
+        if self._clickable and e.button() == Qt.LeftButton:
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if (self._clickable and e.button() == Qt.LeftButton
+                and self.rect().contains(e.position().toPoint())):
+            self.clicked.emit()
+            return
+        super().mouseReleaseEvent(e)
 
     @classmethod
     def _make(cls, kind, title, content, parent, orient, closable, duration):

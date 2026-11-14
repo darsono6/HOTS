@@ -1,18 +1,23 @@
+import ctypes
 import os
+import platform
+import re
+import sys
 import webbrowser
+from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QGridLayout, QSizePolicy
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QGridLayout, QSizePolicy, QApplication
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QPixmap
 
 from ..icons import FIF
 from ..ui_parts import IconWidget
-from ..constants import DARK, load_settings, save_settings
-from ..widgets_qt import HOTSPage, HOTSDialog, HOTSButton, HOTSSwitch, colored_svg_icon
-from ..i18n import T
-from ..bg_tasks import register_qthread, is_shutting_down
+from ..constants import DARK
+from ..widgets_qt import HOTSPage, HOTSButton, colored_svg_icon
+from ..i18n import T, current_lang
 
-from ._about_shared import APP_VERSION, _UpdateCheckWorker, _parse_version, _safe_t
+from ._about_shared import APP_VERSION, _safe_t
 
 
 class AboutPage(HOTSPage):
@@ -31,7 +36,7 @@ class AboutPage(HOTSPage):
 
         top = QWidget()
         top.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         top.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         top_outer_lay = QVBoxLayout(top)
@@ -73,38 +78,34 @@ class AboutPage(HOTSPage):
         self._website_btn = HOTSButton(FIF.GLOBE, "#60c8ff", T("about_website_btn"))
         self._website_btn.fit_to_content()
         self._website_btn.clicked.connect(lambda: webbrowser.open("https://hotstools.com"))
-        right_w = QWidget()
-        right_w.setFixedHeight(126)
-        right_w.setStyleSheet("background: transparent; border: none;")
-        right_col = QVBoxLayout(right_w)
-        right_col.setContentsMargins(0, 0, 0, 0)
-        right_col.setSpacing(0)
-        right_col.addStretch(1)
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(16)
-        btn_row.addWidget(self._website_btn)
 
-        self._update_btn = HOTSButton(FIF.SYNC, "#60c8ff", T("about_check_update"))
-        self._update_btn.fit_to_content()
-        self._update_btn.clicked.connect(self._check_for_updates)
-        btn_row.addWidget(self._update_btn)
-        right_col.addLayout(btn_row)
-        right_col.addStretch(1)
+        self._diag_btn = HOTSButton(FIF.COPY if hasattr(FIF, "COPY") else FIF.DOCUMENT, "#60c8ff", T("about_diag_btn"))
+        self._diag_btn.fit_to_content()
+        self._diag_btn.clicked.connect(self._copy_diagnostics)
+        self._website_btn.set_label(T("about_diag_copied"))
+        self._website_btn.fit_to_content()
+        copied_w = self._website_btn.width()
+        self._website_btn.set_label(T("about_website_btn"))
+        self._website_btn.fit_to_content()
+        btn_w = max(self._website_btn.width(), self._diag_btn.width(), copied_w)
+        self._website_btn.setFixedWidth(btn_w)
+        self._diag_btn.setFixedWidth(btn_w)
+        self._website_btn.layout().insertStretch(0)
+        self._diag_btn.layout().insertStretch(0)
 
-        startup_checked = str(load_settings().get("check_updates_on_startup", "1")).strip().lower() in ("1", "true", "yes")
-        self._update_startup_cb = HOTSSwitch(T("about_check_update_startup"), font_pt=8, color=DARK['fg2'], spacing=8)
-        self._update_startup_cb.setChecked(startup_checked)
-        self._update_startup_cb.setFocusPolicy(Qt.NoFocus)
-        self._update_startup_cb.toggled.connect(self._on_check_update_startup_toggled)
-        right_col.addWidget(self._update_startup_cb, 0, Qt.AlignRight)
-        top_lay.addWidget(right_w)
+        btn_col = QVBoxLayout()
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(6)
+        btn_col.addWidget(self._website_btn)
+        btn_col.addWidget(self._diag_btn)
+        top_lay.addLayout(btn_col, 0)
 
         cl.addWidget(top)
         cl.addSpacing(6)
 
         desc_w = QWidget()
         desc_w.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         desc_lay = QVBoxLayout(desc_w)
         desc_lay.setContentsMargins(20, 14, 20, 14)
@@ -118,7 +119,7 @@ class AboutPage(HOTSPage):
 
         feat_w = QWidget()
         feat_w.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         feat_lay = QGridLayout(feat_w)
         feat_lay.setContentsMargins(20, 14, 20, 14)
@@ -138,7 +139,7 @@ class AboutPage(HOTSPage):
             (FIF.CERTIFICATE,   T("about_feat_hostslock")),
             (FIF.APPLICATION,   T("about_feat_appblock")),
             (FIF.CLOUD if hasattr(FIF, "CLOUD") else FIF.GLOBE, T("about_feat_doh")),
-            (FIF.VPN if hasattr(FIF, "VPN") else FIF.GLOBE,     T("about_feat_vpn")),
+            (FIF.CONNECT,       T("about_feat_netblock")),
             (FIF.EDIT,          T("about_feat_customdomains")),
             (FIF.SYNC if hasattr(FIF, "SYNC") else FIF.APPLICATION, T("about_feat_rstruilock")),
         ]
@@ -167,7 +168,7 @@ class AboutPage(HOTSPage):
 
         footer = QWidget()
         footer.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         footer_lay = QHBoxLayout(footer)
         footer_lay.setContentsMargins(16, 10, 12, 10)
@@ -176,74 +177,82 @@ class AboutPage(HOTSPage):
         author.setStyleSheet(f"color: {DARK['fg2']}; font-size: 8pt; background: transparent; border: none;")
         footer_lay.addWidget(author)
         footer_lay.addStretch()
+
+        license_btn = HOTSButton(FIF.DOCUMENT, "#60c8ff", T("about_license_btn"))
+        license_btn.fit_to_content()
+        license_btn.clicked.connect(lambda: self._open_notice(
+            "LICENSE.txt", "https://www.gnu.org/licenses/gpl-3.0.html"))
+        footer_lay.addWidget(license_btn)
+
+        notices_btn = HOTSButton(FIF.DOCUMENT, "#60c8ff", T("about_notices_btn"))
+        notices_btn.fit_to_content()
+        notices_btn.clicked.connect(lambda: self._open_notice(
+            "THIRD-PARTY-NOTICES.txt", "https://hotstools.com/licenses/"))
+        footer_lay.addWidget(notices_btn)
         cl.addWidget(footer)
 
-    def _on_check_update_startup_toggled(self, checked: bool):
-        fresh = load_settings()
-        fresh["check_updates_on_startup"] = bool(checked)
-        save_settings(fresh)
+    @staticmethod
+    def _anonymize(text: str) -> str:
+        home = str(Path.home())
+        if len(home) > 3:
+            text = re.sub(re.escape(home), "%USERPROFILE%", text, flags=re.IGNORECASE)
+        for value in (os.environ.get("USERNAME", ""), os.environ.get("COMPUTERNAME", "")):
+            if len(value) >= 3:
+                text = re.sub(re.escape(value), "<user>" if value == os.environ.get("USERNAME") else "<pc>",
+                              text, flags=re.IGNORECASE)
+        return text
 
-    def _check_for_updates(self):
-        if getattr(self, "_known_update_url", None):
-            webbrowser.open(self._known_update_url)
-            self._known_update_url = None
-            self._update_btn.set_icon(FIF.SYNC, "#60c8ff")
-            self._update_btn.set_label(T("about_check_update"))
-            self._update_btn.fit_to_content()
-            return
-        if getattr(self, "_update_worker", None) is not None and self._update_worker.isRunning():
-            return
+    @staticmethod
+    def _log_tail(max_lines: int = 80, max_bytes: int = 20 * 1024) -> str:
+        path = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts" / "error.log"
+        try:
+            if path.is_symlink() or not path.is_file():
+                return "(no entries)"
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - max_bytes))
+                data = f.read(max_bytes)
+            lines = data.decode("utf-8", errors="replace").splitlines()[-max_lines:]
+            return "\n".join(lines) if lines else "(no entries)"
+        except OSError:
+            return "(no entries)"
 
-        self._update_btn.setEnabled(False)
-        self._update_btn.set_label(T("about_checking_update"))
-        self._update_btn.fit_to_content()
-
-        self._update_worker = _UpdateCheckWorker(self)
-        self._update_worker.finished_ok.connect(self._on_update_check_ok)
-        self._update_worker.failed.connect(self._on_update_check_failed)
-        self._update_worker.finished.connect(self._reset_update_button)
-        self._update_worker.finished.connect(self._update_worker.deleteLater)
-        register_qthread(self._update_worker)
-        self._update_worker.start()
-
-    def _reset_update_button(self):
-        if is_shutting_down():
-            return
-        self._update_worker = None
-        self._update_btn.setEnabled(True)
-        if not getattr(self, "_known_update_url", None):
-            self._update_btn.set_label(T("about_check_update"))
-        self._update_btn.fit_to_content()
-
-    def apply_known_update(self, tag: str, url: str):
-        self._known_update_url = url
-        self._update_btn.set_icon(FIF.DOWNLOAD, "#60c8ff")
-        self._update_btn.set_label(T("about_download_update"))
-        self._update_btn.fit_to_content()
-
-    def _on_update_check_ok(self, latest_tag: str, release_url: str):
-        latest_v = _parse_version(latest_tag)
-        current_v = _parse_version(APP_VERSION)
-
-        if latest_v > current_v:
-            self.apply_known_update(latest_tag, release_url)
-            open_it = HOTSDialog.ask(
-                self,
-                T("about_update_available_title"),
-                T("about_update_available_msg").format(version=latest_tag, current=APP_VERSION),
-            )
-            if open_it:
-                webbrowser.open(release_url)
-        else:
-            HOTSDialog.info(
-                self,
-                T("about_update_uptodate_title"),
-                T("about_update_uptodate_msg").format(current=APP_VERSION),
-            )
-
-    def _on_update_check_failed(self, error: str):
-        HOTSDialog.error(
-            self,
-            T("about_update_error_title"),
-            T("about_update_error_msg").format(error=error),
+    def _copy_diagnostics(self):
+        try:
+            import PySide6
+            qt_ver = PySide6.__version__
+        except Exception:
+            qt_ver = "?"
+        try:
+            admin = "administrator" if ctypes.windll.shell32.IsUserAnAdmin() else "standard user"
+        except Exception:
+            admin = "unknown"
+        try:
+            build = sys.getwindowsversion().build
+        except Exception:
+            build = "?"
+        header = (
+            f"HOTS Hosts {APP_VERSION}\n"
+            f"Windows: {platform.release()}, build {build} ({platform.machine()})\n"
+            f"Program language: {current_lang().upper()}\n"
+            f"Privileges: {admin}\n"
+            f"Python {platform.python_version()} | PySide6 {qt_ver}\n"
+            f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"--- error.log (last 80 lines) ---\n"
         )
+        QApplication.clipboard().setText(self._anonymize(header + self._log_tail()))
+        self._diag_btn.set_label(T("about_diag_copied"))
+        QTimer.singleShot(2000, lambda: self._diag_btn.set_label(T("about_diag_btn")))
+
+    def _open_notice(self, filename: str, url: str):
+        try:
+            if webbrowser.open(url):
+                return
+        except Exception:
+            pass
+        path = self._find_asset(filename)
+        if path:
+            try:
+                os.startfile(path)
+            except OSError:
+                pass

@@ -1,5 +1,7 @@
+import ipaddress
 import os
 import re
+import tempfile
 
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QWidget, QTextEdit
 from PySide6.QtGui import QTextBlockFormat, QTextCursor
@@ -14,22 +16,50 @@ _DOMAIN_RE = re.compile(
 )
 
 
+def _is_ip(token: str) -> bool:
+    try:
+        ipaddress.ip_address(token)
+    except ValueError:
+        return False
+    return True
+
+
+def _split_hosts_line(line: str):
+    parts = line.split()
+    if len(parts) > 1 and _is_ip(parts[0]):
+        return parts[1:]
+    return [line]
+
+
+def _clean_candidate(item: str) -> str:
+    candidate = re.sub(r"^https?://", "", item, flags=re.IGNORECASE)
+    return candidate.split("/")[0].split(":")[0].strip().lower()
+
+
+def _is_valid_host(candidate: str) -> bool:
+    return (
+        len(candidate) <= 253
+        and bool(_DOMAIN_RE.match(candidate))
+        and not candidate.rsplit(".", 1)[-1].isdigit()
+    )
+
+
 def _normalize_and_validate(raw_text: str):
     valid = []
     invalid = []
     seen = set()
     for line in raw_text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+        line = line.split("#", 1)[0].strip()
+        if not line:
             continue
-        candidate = re.sub(r"^https?://", "", line, flags=re.IGNORECASE)
-        candidate = candidate.split("/")[0].split(":")[0].strip().lower()
-        if _DOMAIN_RE.match(candidate):
+        found = [_clean_candidate(item) for item in _split_hosts_line(line)]
+        if not all(_is_valid_host(c) for c in found):
+            invalid.append(line)
+            continue
+        for candidate in found:
             if candidate not in seen:
                 seen.add(candidate)
                 valid.append(candidate)
-        else:
-            invalid.append(line)
     return valid, invalid
 
 
@@ -128,9 +158,21 @@ class CustomDomainsDialog(HOTSDialog):
         try:
             if self._path:
                 os.makedirs(os.path.dirname(self._path), exist_ok=True)
-                with open(self._path, "w", encoding="utf-8") as f:
-                    for domain in sorted(valid):
-                        f.write(domain + "\n")
+                target_dir = os.path.dirname(self._path)
+                fd, tmp_path = tempfile.mkstemp(dir=target_dir, prefix=".custom_domains_", suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        for domain in sorted(valid):
+                            f.write(domain + "\n")
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_path, self._path)
+                except Exception:
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                    raise
         except OSError as exc:
             HOTSDialog.error(self, T("par_custom_err_title"), str(exc))
             return

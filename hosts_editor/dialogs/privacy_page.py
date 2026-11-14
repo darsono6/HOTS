@@ -253,7 +253,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
     def _make_restore_banner(self) -> QWidget:
         outer = QWidget()
         outer.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         h = QHBoxLayout(outer)
         h.setContentsMargins(16, 14, 16, 14)
@@ -414,7 +414,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         active = bool(AppBlockManager.is_ifeo_blocked(_RSTRUI_EXE))
         outer = QWidget()
         outer.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         h = QHBoxLayout(outer)
         h.setContentsMargins(16, 14, 16, 14)
@@ -587,7 +587,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
     def _make_antispy_levels_group(self, level_configs: list) -> QWidget:
         outer = QWidget()
         outer.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         outer_lay = QVBoxLayout(outer)
         outer_lay.setContentsMargins(0, 0, 0, 0)
@@ -756,7 +756,7 @@ class PrivacyPage(_ParentalCardMixin, HOTSPage):
         checklist = QWidget()
         checklist.setVisible(False)
         checklist.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         cl_lay = QVBoxLayout(checklist)
         cl_lay.setContentsMargins(8, 8, 8, 8)

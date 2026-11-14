@@ -5,7 +5,7 @@ from ..icons import FIF
 from ..constants import DARK
 from ..widgets_qt import HOTSDialog, HOTSButton, h_separator, attach_line_edit_context_menu
 from ..i18n import T
-from ..password_utils import hash_password, verify_password
+from ..password_utils import verify_password
 
 
 def _pass_field(placeholder="") -> QLineEdit:
@@ -19,122 +19,6 @@ def _pass_field(placeholder="") -> QLineEdit:
     )
     attach_line_edit_context_menu(e)
     return e
-
-
-class SetPasswordDialog(HOTSDialog):
-    def __init__(self, parent, current_hash: str, on_save):
-        super().__init__(parent, T("pwd_set_title"), min_width=360, min_height=280)
-        self._on_save  = on_save
-        self._cur_hash = current_hash
-        self._has_pass = bool(current_hash)
-        self._build()
-        self.adjustSize()
-        self.center_on_parent()
-
-    def _build(self):
-        cl = self.body_layout
-        cl.setContentsMargins(22, 16, 22, 12)
-        cl.setSpacing(8)
-
-        info_color = "#d4800a" if self._has_pass else DARK["fg2"]
-        info_text  = T("pwd_info_on") if self._has_pass else T("pwd_info_off")
-        info = QLabel(info_text)
-        info.setWordWrap(True)
-        info.setStyleSheet(f"color: {info_color}; background: transparent;")
-        cl.addWidget(info)
-
-        self._old_edit = None
-        if self._has_pass:
-            cl.addWidget(self._flbl(T("pwd_lbl_current")))
-            self._old_edit = _pass_field()
-            cl.addWidget(self._old_edit)
-
-        cl.addWidget(self._flbl(T("pwd_lbl_new")))
-        self._new_edit = _pass_field()
-        cl.addWidget(self._new_edit)
-
-        cl.addWidget(self._flbl(T("pwd_lbl_repeat")))
-        self._rep_edit = _pass_field()
-        cl.addWidget(self._rep_edit)
-        self._rep_edit.returnPressed.connect(self._confirm)
-
-        self._err = QLabel("")
-        self._err.setStyleSheet(f"color: #ff6060; font-size: 8pt; background: transparent;")
-        cl.addWidget(self._err)
-        cl.addWidget(h_separator())
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        save_btn = HOTSButton(FIF.SAVE, "#ffffff", T("pwd_btn_set"), accent=True)
-        save_btn.fit_to_content(min_width=100)
-        save_btn.clicked.connect(self._confirm)
-        btn_row.addWidget(save_btn)
-
-        if self._has_pass:
-            del_btn = HOTSButton(FIF.DELETE, DARK["red"], T("pwd_btn_remove"))
-            del_btn.fit_to_content(min_width=100)
-            del_btn.clicked.connect(self._remove_password)
-            btn_row.addWidget(del_btn)
-
-        cancel_btn = HOTSButton(FIF.CLOSE, DARK["red"], T("pwd_btn_cancel"))
-        cancel_btn.fit_to_content(min_width=100)
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
-        btn_row.addStretch()
-        cl.addLayout(btn_row)
-
-    def _flbl(self, text: str) -> QLabel:
-        l = QLabel(text)
-        l.setStyleSheet(f"color: {DARK['fg']}; font-size: 9pt; background: transparent;")
-        return l
-
-    def _set_err(self, msg: str):
-        self._err.setText(msg)
-
-    def _confirm(self):
-        if self._old_edit is not None:
-            old_val = self._old_edit.text()
-            if not old_val:
-                self._set_err(T("pwd_err_no_current"))
-                return
-            if not verify_password(old_val, self._cur_hash):
-                self._set_err(T("pwd_err_wrong"))
-                self._old_edit.clear()
-                self._old_edit.setFocus()
-                return
-
-        new_val = self._new_edit.text()
-        rep_val = self._rep_edit.text()
-        if not new_val:
-            self._set_err(T("pwd_err_empty"))
-            return
-        if len(new_val) < 4:
-            self._set_err(T("pwd_err_too_short"))
-            return
-        if new_val != rep_val:
-            self._set_err(T("pwd_err_mismatch"))
-            self._rep_edit.clear()
-            self._rep_edit.setFocus()
-            return
-
-        self._on_save(hash_password(new_val))
-        self.accept()
-        HOTSDialog.info(self.parent(), T("pwd_set_ok_title"), T("pwd_set_ok_msg"))
-
-    def _remove_password(self):
-        if self._old_edit is not None:
-            old_val = self._old_edit.text()
-            if not old_val:
-                self._set_err(T("pwd_err_no_for_remove"))
-                return
-            if not verify_password(old_val, self._cur_hash):
-                self._set_err(T("pwd_err_wrong"))
-                self._old_edit.clear()
-                self._old_edit.setFocus()
-                return
-        self._on_save("")
-        self.accept()
-        HOTSDialog.info(self.parent(), T("pwd_remove_ok_title"), T("pwd_remove_ok_msg"))
 
 
 class PasswordPromptDialog(HOTSDialog):
@@ -171,7 +55,7 @@ class PasswordPromptDialog(HOTSDialog):
         cl.addWidget(self._entry)
 
         self._err = QLabel("")
-        self._err.setStyleSheet(f"color: #ff6060; font-size: 8pt; background: transparent;")
+        self._err.setStyleSheet("color: #ff6060; font-size: 8pt; background: transparent;")
         cl.addWidget(self._err)
         cl.addWidget(h_separator())
 

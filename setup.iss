@@ -1,6 +1,6 @@
-﻿
+
 #define MyAppName "HOTS Hosts"
-#define MyAppVersion "2.4"
+#define MyAppVersion "2.5"
 #define MyAppPublisher "Darsono"
 #define MyAppExeName "HOTS Hosts.exe"
 #define MyAppAssocName MyAppName + " File"
@@ -35,12 +35,14 @@ WizardStyle=modern dynamic
 AppMutex=Global\HOTS_HostsEditor_SingleInstance_Mutex
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "dist\hosts_editor_launcher.dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\hosts_editor_launcher.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "hots_uninstall_cleanup.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
@@ -79,15 +81,14 @@ begin
   Result := CompareText(ExtractFileName(RemoveBackslash(ExpandConstant('{app}'))), '{#MyAppName}') = 0;
 end;
 
-// Stricter check for the install-time wipe: the folder must also contain our own files.
+// Stricter check for the install-time wipe: the folder must also contain our own program file.
 function IsOwnInstallFolder(): Boolean;
 var
   Dir: String;
 begin
   Dir := RemoveBackslash(ExpandConstant('{app}'));
   Result := IsOwnFolderName() and
-            FileExists(Dir + '\{#MyAppExeName}') and
-            FileExists(Dir + '\hots_uninstall_cleanup.cmd');
+            FileExists(Dir + '\{#MyAppExeName}');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -111,7 +112,7 @@ begin
     // ProgramData and AppData), so wipe it before copying new files; otherwise
     // files removed or renamed in newer builds (e.g. old Nuitka DLLs) would linger.
     // Safety: only wipe a folder that really is a previous HOTS Hosts install
-    // (right folder name + both of our own files), never an arbitrary folder.
+    // (right folder name + our own program file), never an arbitrary folder.
     if IsOwnInstallFolder() then
       DelTree(ExpandConstant('{app}'), True, True, True);
   end;

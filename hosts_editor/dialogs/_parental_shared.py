@@ -195,7 +195,7 @@ class _ParentalCardMixin:
 
     def _card_frame(self, accent_color: str, height: int = 64) -> QWidget:
         outer = QWidget()
-        outer.setStyleSheet(f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;")
+        outer.setStyleSheet(f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;")
         outer.setFixedHeight(height)
         outer_lay = QHBoxLayout(outer)
         outer_lay.setContentsMargins(0, 0, 0, 0)
@@ -223,7 +223,7 @@ class _ParentalCardMixin:
     def _make_categories_section(self, categories: list, active_map: dict, header_height: int = 64) -> QWidget:
         outer = QWidget()
         outer.setStyleSheet(
-            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 6px;"
+            f"background: {DARK['panel_bg']}; border: 1px solid {DARK['border_faint']}; border-radius: 8px;"
         )
         outer_lay = QVBoxLayout(outer)
         outer_lay.setContentsMargins(0, 0, 0, 0)

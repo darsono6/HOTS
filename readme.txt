@@ -1,4 +1,4 @@
-HOTS Hosts v2.4
+HOTS Hosts v2.5
 ===============
 
 A desktop application for managing the Windows hosts file.
@@ -49,7 +49,7 @@ MAIN FEATURES
 - Privacy tools: 37 individual Windows telemetry/privacy tweaks across
   four levels (Basic / Medium / Advanced / Privacy+), with drift
   detection and System Restore integration
-- Light and dark themes with 5 accent colors
+- Light and dark themes with 6 accent colors, Mica or Acrylic backdrop
 - Built-in update checker (via GitHub Releases); checks on startup by
   default, can be switched off in Options > About
 - Optional password protection (salted hash stored machine-wide in the
@@ -59,38 +59,25 @@ MAIN FEATURES
   Russian, Portuguese, Italian
 
 
-WHAT'S NEW IN 2.4
+WHAT'S NEW IN 2.5
 -----------------
-- Italian language added: the interface is now available in 8 languages
-- The startup password is now stored as a salted hash (existing passwords
-  keep working and are upgraded the next time you change the password)
-- Minor improvements throughout the application's code
-
-
-PARENTAL CONTROL - KNOWN LIMITATIONS
--------------------------------------
-Parental Control blocks domains at the system level using the hosts file
-and, optionally, Cloudflare Family DNS. This is effective but has a few
-inherent limitations you should know about:
-
-1. Large platforms (TikTok, YouTube, Facebook, etc.) use hundreds of
-   changing subdomains and CDN endpoints, so no blocklist can be 100%
-   complete at all times. Built-in lists are updated with each release.
-   You can add missing domains yourself, either directly from the main
-   table or with the dedicated "Block your own domains" list, which
-   survives a hosts file restore or uninstall.
-
-2. Modern browsers (Chrome, Firefox, Edge, Brave) have a feature called
-   Secure DNS / DNS-over-HTTPS (DoH). When enabled, the browser can
-   bypass the hosts file entirely. As of 2.1, HOTS Hosts closes this
-   gap natively - see "DNS-over-HTTPS blocking" above - so there is no
-   need to change anything manually in each browser's settings.
-
-3. The hosts file only affects this Windows PC. Phones, tablets, and
-   traffic tunneled through a VPN service are not covered by these
-   rules. This is separate from the VPN client blocking feature above,
-   which stops specific VPN apps from launching on this PC - it does
-   not affect other devices.
+- Internet blocking: a new option for parents on the Parental Protection page
+- New visual effects: Acrylic material next to Mica, a glow effect with
+  adjustable strength (transparency in Acrylic mode), and a switch to turn
+  window effects off
+- New Graphite accent color (6 accent colors in total)
+- Rebuilt Options page: expandable cards for Language and Appearance, plus
+  Updates (check on startup, manual check), About and Support
+- License information: the About page opens the full license and the
+  third-party notices
+- Updates: clicking an available update now downloads the installer
+  directly, instead of only opening the repository page
+- Copy diagnostics: a new button on the About page copies anonymized
+  system and program information to the clipboard, ready to paste into
+  a bug report
+- Improved blocking of your own domains: the feature has been reworked
+  to work better
+- Several smaller fixes and improvements throughout the application
 
 
 DISCLAIMER
@@ -100,6 +87,16 @@ is not responsible for any damage, data loss, system issues, or other
 consequences resulting from the use of this application. Modifying the
 hosts file affects system-level network resolution - use with care.
 You use this software at your own risk.
+
+
+BUG REPORTS
+-----------
+Found a bug? In the app open About -> Copy diagnostics and paste the
+result into your report (github.com/darsono6/HOTS/issues or email). It
+contains the app and Windows version and the end of the error log; your
+user name and computer name are replaced. The log may include names of
+programs or domains mentioned in error messages - you can review it
+before pasting.
 
 
 SUPPORT

@@ -93,7 +93,7 @@ class EntryDialog(HOTSDialog):
         self._host_edit = _dark_line_edit()
         self._host_edit.setText(entry["hostname"] if entry else "")
         self._host_hint = QLabel("")
-        self._host_hint.setStyleSheet(f"color: #f0c040; font-size: 8pt; background: transparent;")
+        self._host_hint.setStyleSheet("color: #f0c040; font-size: 8pt; background: transparent;")
         self._host_hint.setWordWrap(True)
         form.addRow(_lbl(T("entry_lbl_host")), self._host_edit)
         form.addRow("", self._host_hint)

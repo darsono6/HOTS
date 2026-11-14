@@ -2,12 +2,11 @@ import ctypes
 import json
 import logging
 import os
-import tempfile
 from typing import List, Optional
 
 import winreg
 
-from .secure_storage import ensure_dir
+from .secure_storage import atomic_write_json
 
 logger = logging.getLogger("HOTS.doh")
 
@@ -55,6 +54,19 @@ BROWSERS: List[dict] = [
         "off_value": "off",
     },
     {
+        "id": "vivaldi",
+        "name": "Vivaldi",
+        "exe_paths": [
+            r"%ProgramFiles%\Vivaldi\Application\vivaldi.exe",
+            r"%ProgramFiles(x86)%\Vivaldi\Application\vivaldi.exe",
+            r"%LocalAppData%\Vivaldi\Application\vivaldi.exe",
+        ],
+        "reg_path": r"SOFTWARE\Policies\Vivaldi",
+        "kind": "sz_mode",
+        "value_name": "DnsOverHttpsMode",
+        "off_value": "off",
+    },
+    {
         "id": "firefox",
         "name": "Mozilla Firefox",
         "exe_paths": [
@@ -92,23 +104,6 @@ def _delete_hklm_value(subkey: str, name: str) -> None:
     except FileNotFoundError:
         pass
 
-def _atomic_write_json(path: str, data: dict) -> None:
-    directory = os.path.dirname(path)
-    ensure_dir(directory)
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".doh_", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
-
 def _load_state() -> dict:
     if not os.path.exists(DOH_STATE_FILE):
         return {}
@@ -122,7 +117,7 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     try:
-        _atomic_write_json(DOH_STATE_FILE, state)
+        atomic_write_json(DOH_STATE_FILE, state)
     except Exception as e:
         logger.warning("DohBlockManager: failed to save state file: %s", e)
 
