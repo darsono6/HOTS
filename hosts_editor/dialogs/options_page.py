@@ -24,6 +24,7 @@ from ..password_utils import hash_password, verify_password
 
 from ._about_shared import APP_VERSION, _UpdateCheckWorker, _DownloadWorker, _parse_version
 from .password_dialog import _pass_field
+from ._remote_card import RemotePanel
 
 _ACCENT_LABEL_KEYS = {
     "gold": "acc_gold",
@@ -297,6 +298,8 @@ class OptionsPage(HOTSPage):
 
     def refresh_content(self):
         self._refresh_password_state()
+        if hasattr(self, "_remote_panel"):
+            self._remote_panel.refresh()
 
     def _build(self, on_about, on_support):
         cl = self.content_layout
@@ -333,7 +336,13 @@ class OptionsPage(HOTSPage):
         appearance.make_expandable(self._build_appearance_panel())
         lay.addWidget(appearance)
 
-        expandable = (self._pw_card, language, appearance)
+        self._remote_card = _Card(FIF.CONNECT, T("opt_remote"), _desc_label(T("opt_remote_desc")), clickable=True)
+        self._remote_panel = RemotePanel(on_state_changed=self._remote_card.set_title)
+        self._remote_card.make_expandable(self._remote_panel)
+        self._remote_card.expanded.connect(lambda _c: self._remote_panel.refresh())
+        lay.addWidget(self._remote_card)
+
+        expandable = (self._pw_card, language, appearance, self._remote_card)
         for card in expandable:
             card.expanded.connect(
                 lambda opened, cards=expandable: [c.set_expanded(False) for c in cards if c is not opened])

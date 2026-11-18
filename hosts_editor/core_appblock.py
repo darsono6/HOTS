@@ -35,6 +35,7 @@ KNOWN_VPN_EXES = [
 ]
 
 OWN_EXE_NAME = "hots hosts.exe"
+OWN_AGENT_EXE_NAME = "hots remote agent.exe"
 
 PROTECTED_SYSTEM_EXES = {
     "notepad.exe", "cmd.exe", "sethc.exe", "utilman.exe", "taskmgr.exe",
@@ -417,7 +418,7 @@ class AppBlockManager:
         if exe_name in PROTECTED_SYSTEM_EXES:
             cls.last_error = "protected_system_app"
             return False
-        if exe_name == OWN_EXE_NAME:
+        if exe_name in (OWN_EXE_NAME, OWN_AGENT_EXE_NAME):
             cls.last_error = "self_block"
             return False
         if not _is_admin():

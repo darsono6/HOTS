@@ -33,12 +33,15 @@ def _build_ssl_context():
     except Exception:
         return ssl.create_default_context()
 
-APP_VERSION = "2.5"
+from ..version import APP_VERSION  # noqa: E402  (re-exported for the dialogs)
 
-GITHUB_REPO = "darsono6/HOTS"
+# Fork with remote administration: updates must come from this repository, otherwise the
+# upstream installer would replace the program without the remote agent.
+GITHUB_REPO = "jrsmrtn/HOTS-Web-Administrated"
 GITHUB_API_LATEST_RELEASE = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
-SITE_VERSION_URL = "https://hotstools.com/hosts/version.txt"
+# The upstream site advertises upstream versions only: no fallback for this fork.
+SITE_VERSION_URL = ""
 SITE_PAGE_URL = "https://hotstools.com/hosts/"
 _SITE_VERSION_RE = re.compile(r"\d{1,5}(\.\d{1,5}){0,3}")
 _MAX_RESPONSE_BYTES = 1_000_000
@@ -79,6 +82,8 @@ def _pick_installer_asset(data: dict):
 
 
 def _read_site_version():
+    if not SITE_VERSION_URL:
+        return None
     try:
         request = urllib.request.Request(SITE_VERSION_URL, headers={"User-Agent": "HOTS-UpdateChecker"})
         opener = urllib.request.build_opener(

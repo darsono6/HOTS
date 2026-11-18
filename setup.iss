@@ -1,8 +1,10 @@
 
 #define MyAppName "HOTS Hosts"
-#define MyAppVersion "2.5"
+#define MyAppVersion "2.5.1"
 #define MyAppPublisher "Darsono"
 #define MyAppExeName "HOTS Hosts.exe"
+#define AgentExeName "HOTS Remote Agent.exe"
+#define AgentTaskName "HOTS Hosts Remote Agent"
 #define MyAppAssocName MyAppName + " File"
 #define MyAppAssocExt ""
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
@@ -13,7 +15,7 @@ AppId={{4340573B-8723-4313-8A37-F61536544D32}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-VersionInfoVersion={#MyAppVersion}.0.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoTextVersion={#MyAppVersion}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoProductName={#MyAppName}
@@ -40,6 +42,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "dist\hosts_editor_launcher.dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\hosts_editor_launcher.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Same program under a dedicated name for the remote-administration agent (scheduled task, SYSTEM):
+; easy to tell apart in the Task Manager, and never caught by a block on "HOTS Hosts.exe".
+Source: "dist\hosts_editor_launcher.dist\{#MyAppExeName}"; DestDir: "{app}"; DestName: "{#AgentExeName}"; Flags: ignoreversion
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -59,6 +64,8 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+; Stops and unregisters the remote agent, tells the console the PC was uninstalled.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--agent-uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "HOTSAgentUninstall"
 Filename: "{app}\hots_uninstall_cleanup.cmd"; Parameters: """{app}\hots_uninst_choices.json"" ""{userappdata}\HOTS Hosts\hots_uninst_auth.tmp"""; Flags: runhidden waituntilterminated
 
 [UninstallDelete]
@@ -71,6 +78,129 @@ Type: filesandordirs; Name: "{app}"; Check: IsOwnFolderName
 
 var
   VerifiedPassword: String;
+  RemotePage: TInputQueryWizardPage;
+
+// ---------------------------------------------------------------------------------------------
+// Remote administration (web console). Texts are picked at run time (French or English) so the
+// script does not depend on the language names emitted by EmitLanguagesSection.
+// ---------------------------------------------------------------------------------------------
+
+function Tr(const Fr, En: String): String;
+begin
+  if Pos('fr', LowerCase(ActiveLanguage)) = 1 then
+    Result := Fr
+  else
+    Result := En;
+end;
+
+function AgentConfigFile(): String;
+begin
+  Result := ExpandConstant('{commonappdata}\HOTS Hosts\remote_agent.json');
+end;
+
+function AlreadyEnrolled(): Boolean;
+begin
+  Result := FileExists(AgentConfigFile());
+end;
+
+function CleanArg(const Value: String): String;
+begin
+  Result := Trim(Value);
+  StringChangeEx(Result, '"', '', True);
+end;
+
+procedure InitializeWizard();
+var
+  Desc: String;
+begin
+  if AlreadyEnrolled() then
+    Desc := Tr('Ce PC est déjà relié à une console web. Laissez ces champs vides pour conserver ce réglage, ' +
+               'ou saisissez un nouveau code pour le relier à une autre console.',
+               'This PC is already connected to a web console. Leave these fields empty to keep it, ' +
+               'or enter a new code to connect it to another console.')
+  else
+    Desc := Tr('Facultatif. Pour administrer ce PC à distance, saisissez l''adresse de votre console web et le ' +
+               'code d''ajout affiché dans la console (bouton « Ajouter un PC »). Laissez vide pour ignorer : ' +
+               'vous pourrez le faire plus tard dans Options > Administration à distance.',
+               'Optional. To manage this PC remotely, enter your web console address and the enrollment code ' +
+               'shown in the console ("Add a PC" button). Leave empty to skip: you can do it later in ' +
+               'Options > Remote administration.');
+  RemotePage := CreateInputQueryPage(wpSelectTasks,
+    Tr('Administration à distance', 'Remote administration'),
+    Tr('Relier ce PC à une console web HOTS Hosts', 'Connect this PC to a HOTS Hosts web console'),
+    Desc);
+  RemotePage.Add(Tr('Adresse de la console (ex. : https://console.exemple.fr) :',
+                    'Console address (e.g. https://console.example.com):'), False);
+  RemotePage.Add(Tr('Code d''ajout (ex. : ABCD-EFGH) :', 'Enrollment code (e.g. ABCD-EFGH):'), False);
+  // Silent deployment: HOTS_Hosts_setup.exe /VERYSILENT /SERVER=https://... /CODE=ABCD-EFGH
+  RemotePage.Values[0] := ExpandConstant('{param:SERVER|}');
+  RemotePage.Values[1] := ExpandConstant('{param:CODE|}');
+end;
+
+function RemotePageValid(): Boolean;
+var
+  Server, Code: String;
+begin
+  Result := True;
+  Server := Trim(RemotePage.Values[0]);
+  Code := Trim(RemotePage.Values[1]);
+  if (Code <> '') and (Server = '') then
+  begin
+    MsgBox(Tr('Indiquez l''adresse de la console.', 'Please enter the console address.'), mbError, MB_OK);
+    Result := False;
+  end
+  else if (Server <> '') and (Code = '') then
+  begin
+    MsgBox(Tr('Indiquez le code d''ajout affiché dans la console.', 'Please enter the enrollment code shown in the console.'), mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
+// Stop the agent before files are replaced (an older, upstream build does not know --agent-stop).
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  RC: Integer;
+begin
+  Result := '';
+  Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "{#AgentTaskName}"', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "{#AgentExeName}"', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Sleep(500);
+end;
+
+procedure ConfigureRemoteAgent();
+var
+  Server, Code, ResultFile, Msg: String;
+  Lines: TArrayOfString;
+  I, RC: Integer;
+begin
+  Server := CleanArg(RemotePage.Values[0]);
+  Code := CleanArg(RemotePage.Values[1]);
+  if (Server <> '') and (Code <> '') then
+  begin
+    ResultFile := ExpandConstant('{tmp}\hots_enroll_result.txt');
+    if Exec(ExpandConstant('{app}\{#MyAppExeName}'),
+            '--agent-enroll "' + Server + '" "' + Code + '" "' + ResultFile + '"',
+            '', SW_HIDE, ewWaitUntilTerminated, RC) and (RC = 0) then
+      Log('Remote administration: PC connected to ' + Server)
+    else
+    begin
+      Msg := '';
+      if LoadStringsFromFile(ResultFile, Lines) then
+        for I := 0 to GetArrayLength(Lines) - 1 do
+          Msg := Msg + Lines[I] + ' ';
+      Log('Remote administration: enrollment failed (' + IntToStr(RC) + '): ' + Msg);
+      if not WizardSilent then
+        MsgBox(Tr('Le PC n''a pas pu être relié à la console :', 'This PC could not be connected to the console:') +
+               #13#10#13#10 + Msg + #13#10#13#10 +
+               Tr('HOTS Hosts est bien installé. Vous pourrez réessayer depuis Options > Administration à distance.',
+                  'HOTS Hosts is installed. You can try again from Options > Remote administration.'),
+               mbError, MB_OK);
+    end;
+  end
+  else if AlreadyEnrolled() then
+    // Upgrade: re-register the scheduled task for the new files and restart the agent.
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), '--agent-install-task', '', SW_HIDE, ewWaitUntilTerminated, RC);
+end;
 
 // The install folder is wiped on update and on uninstall, so it must always be a
 // folder dedicated to this program. Whatever location the user picks, the program
@@ -96,6 +226,8 @@ var
   Dir: String;
 begin
   Result := True;
+  if (RemotePage <> nil) and (CurPageID = RemotePage.ID) then
+    Result := RemotePageValid();
   if CurPageID = wpSelectDir then
   begin
     Dir := RemoveBackslash(WizardDirValue);
@@ -106,6 +238,8 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssPostInstall then
+    ConfigureRemoteAgent();
   if CurStep = ssInstall then
   begin
     // {app} holds no user data (password/settings/block lists live in

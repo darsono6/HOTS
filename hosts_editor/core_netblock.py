@@ -9,6 +9,7 @@ from typing import Optional
 from .core_antispy import _is_admin, _console_encoding, CREATE_NO_WINDOW
 from .i18n import T
 from .secure_storage import PROGRAMDATA_DIR, atomic_write_json
+from .remote.netutil import carve_ranges
 
 logger = logging.getLogger("HOTS.netblock")
 
@@ -21,6 +22,22 @@ _RULES = (
      "169.255.0.0-172.15.255.255,172.32.0.0-192.167.255.255,192.169.0.0-223.255.255.255"),
     ("HOTS Internet Block v6", "2000::/3"),
 )
+
+
+def _excluded_ips() -> list:
+    """IPs that must stay reachable: the remote-administration console server, if configured.
+    Without this, blocking the Internet would also cut the PC off from remote administration."""
+    try:
+        from .remote.config import netblock_exclusions
+        return netblock_exclusions()
+    except Exception:
+        return []
+
+
+def _effective_rules(excluded=None) -> tuple:
+    excluded = _excluded_ips() if excluded is None else excluded
+    return tuple((name, carve_ranges(remote, excluded)) for name, remote in _RULES)
+
 
 _FIREWALL_POLICY_KEY = r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy"
 
@@ -87,8 +104,9 @@ class NetBlockManager:
             if r is None or r.returncode != 0:
                 NetBlockManager.last_error = T("netblock_err_firewall")
                 return False
+            excluded = _excluded_ips()
             try:
-                for name, remote in _RULES:
+                for name, remote in _effective_rules(excluded):
                     _run_netsh(["advfirewall", "firewall", "delete", "rule", f"name={name}"])
                     r = _run_netsh([
                         "advfirewall", "firewall", "add", "rule",
@@ -105,7 +123,7 @@ class NetBlockManager:
                     NetBlockManager.last_error = T("netblock_err_rule")
                     _remove_rules()
                     return False
-                atomic_write_json(STATE_FILE, {"active": True})
+                atomic_write_json(STATE_FILE, {"active": True, "excluded": sorted(excluded)})
             except Exception as e:
                 NetBlockManager.last_error = str(e)
                 logger.exception("NetBlockManager.enable: unexpected error")
@@ -133,6 +151,18 @@ class NetBlockManager:
                 return False
             logger.info("NetBlockManager.disable: OK")
             return True
+
+    @staticmethod
+    def exclusions_outdated() -> bool:
+        """True when the block is on but was applied for other console-server IPs."""
+        if not NetBlockManager.is_active():
+            return False
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                applied = json.load(f).get("excluded") or []
+        except Exception:
+            applied = []
+        return sorted(applied) != sorted(_excluded_ips())
 
     @staticmethod
     def check_drift() -> Optional[str]:

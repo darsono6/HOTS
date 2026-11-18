@@ -1,5 +1,10 @@
 name: Build and Release
 
+# Push a tag such as v2.5.1 to publish a release with:
+#   - HOTS_Hosts_setup.exe            Windows installer (desktop app + remote-administration agent)
+#   - HOTS_Console_Server.zip         web console for an Ubuntu server (deploy.sh inside, VERSION file)
+#   - SHA256SUMS.txt
+
 on:
   push:
     tags:
@@ -7,11 +12,26 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the tag matches the program version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app=$(sed -n 's/^APP_VERSION = "\(.*\)"/\1/p' hosts_editor/version.py)
+          iss=$(sed -n 's/^#define MyAppVersion "\(.*\)"/\1/p' setup.iss)
+          echo "tag=$tag app=$app installer=$iss"
+          if [ "$tag" != "$app" ] || [ "$tag" != "$iss" ]; then
+            echo "::error::Tag v$tag must match hosts_editor/version.py ($app) and setup.iss ($iss)"
+            exit 1
+          fi
+
+  windows-installer:
+    needs: versions
     runs-on: windows-latest
-    permissions:
-      contents: write
-       
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -40,6 +60,7 @@ jobs:
             --include-data-files="hosts_editor/graphic/support_me_on_kofi_dark.png=graphic/support_me_on_kofi_dark.png" `
             --include-data-files="hosts_editor/graphic/paypal_donate_button.png=graphic/paypal_donate_button.png" `
             --include-data-dir="hosts_editor/blocklists=blocklists" `
+            --include-package=hosts_editor.remote `
             --include-package-data=certifi `
             --enable-plugin=pyside6 `
             --nofollow-import-to=PIL `
@@ -47,20 +68,91 @@ jobs:
             --nofollow-import-to=colorthief `
             hosts_editor_launcher.pyw
 
+      - name: Smoke test the remote agent entry point
+        shell: pwsh
+        run: |
+          # Not enrolled: --agent-run must exit cleanly (code 0) without opening any window.
+          $p = Start-Process -FilePath "dist\hosts_editor_launcher.dist\HOTS Hosts.exe" -ArgumentList "--agent-run" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "--agent-run exited with $($p.ExitCode)" }
+
       - name: Install Inno Setup
         run: choco install innosetup -y
 
       - name: Build installer with Inno Setup
         run: iscc setup.iss
 
-      - name: Upload artifact
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: installer
           path: Output/*.exe
 
+  console-server:
+    needs: versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the server and the agent protocol
+        run: |
+          python -m pip install -r server/requirements.txt pytest httpx
+          python -m pytest -q server/tests
+
+      - name: Build the server package
+        shell: bash
+        run: |
+          # Stable name so that .../releases/latest/download/HOTS_Console_Server.zip always works.
+          name="HOTS_Console_Server"
+          mkdir -p "build/$name"
+          cp -r server/hots_server server/requirements.txt server/README.md LICENSE.txt "build/$name/"
+          cp server/deploy/deploy.sh "build/$name/deploy.sh"
+          chmod +x "build/$name/deploy.sh"
+          echo "${GITHUB_REF_NAME}" > "build/$name/VERSION"
+          find "build/$name" -name '__pycache__' -prune -exec rm -rf {} +
+          (cd build && zip -qr "$name.zip" "$name")
+          ls -la build
+
+      - name: Upload server package
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-server
+          path: build/*.zip
+
+  release:
+    needs: [windows-installer, console-server]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: Output/*.exe
+          files: |
+            assets/*.exe
+            assets/*.zip
+            assets/SHA256SUMS.txt
+          body: |
+            ## Télécharger
+
+            | Pour… | Fichier |
+            |---|---|
+            | 💻 Le PC à protéger (Windows 10/11) | **HOTS_Hosts_setup.exe** |
+            | 🌐 Votre serveur de console (Ubuntu) | **HOTS_Console_Server.zip** — dézippez puis `sudo ./deploy.sh` |
+
+            Guide d'installation de la console : [docs/CONSOLE_WEB.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/CONSOLE_WEB.md)

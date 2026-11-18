@@ -1,5 +1,23 @@
 <div align="center">
 
+> ## 🌐 Ce fork : HOTS Hosts administré 100 % à distance
+>
+> Une **console web multi-clients** pour piloter à distance, depuis un navigateur ou un téléphone, le contrôle parental et toutes les protections de vos PC Windows — sans vous asseoir devant.
+>
+> | 💻 PC à protéger (Windows) | 🌐 Serveur de console (Ubuntu) | 📖 Guide |
+> |---|---|---|
+> | [**HOTS_Hosts_setup.exe**](https://github.com/jrsmrtn/HOTS-Web-Administrated/releases/latest/download/HOTS_Hosts_setup.exe) | [**HOTS_Console_Server.zip**](https://github.com/jrsmrtn/HOTS-Web-Administrated/releases/latest/download/HOTS_Console_Server.zip) → `sudo ./deploy.sh` | [docs/CONSOLE_WEB.md](docs/CONSOLE_WEB.md) |
+>
+> Installation du serveur en une commande avec assistant graphique et HTTPS automatique · chaque client ne voit que ses PC · ajout d'un PC par un simple code saisi pendant l'installation · modifications appliquées en ~1 s, ou dès que le PC se rallume.
+>
+> Fork de [darsono6/HOTS](https://github.com/darsono6/HOTS) — tout le reste de cette page décrit l'application d'origine, incluse à l'identique.
+
+</div>
+
+---
+
+<div align="center">
+
 <img src="hosts_editor/assets/banner.png" alt="HOTS Hosts Banner" width="720"/>
 
 # HOTS Hosts
@@ -10,7 +28,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20%2864--bit%29-0078D4?logo=windows)](https://github.com/)
 [![Language](https://img.shields.io/badge/Language-EN%20%7C%20PL%20%7C%20FR%20%7C%20DE%20%7C%20ES%20%7C%20PT%20%7C%20RU%20%7C%20IT-brightgreen)](#language-support)
 
-### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest)
+### 📥 [⬇️ Download for Windows — free](https://github.com/jrsmrtn/HOTS-Web-Administrated/releases/latest)
 
 *No account, no subscription, no ads. Just download and run.*
 
@@ -36,7 +54,7 @@ You don't need to understand *how* any of this works to use it — the app walks
 
 ## Getting started
 
-1. Download the installer from the [Releases page](https://github.com/darsono6/HOTS/releases/latest)
+1. Download the installer from the [Releases page](https://github.com/jrsmrtn/HOTS-Web-Administrated/releases/latest)
 2. Double-click it — Windows will ask for Administrator permission (that's normal, the app needs it to edit system files)
 3. Follow the setup wizard — done
 
@@ -153,7 +171,7 @@ Includes a drift detector that warns you if Windows quietly re-enables something
 
 <div align="center">
 
-### 📥 [⬇️ Download for Windows — free](https://github.com/darsono6/HOTS/releases/latest)
+### 📥 [⬇️ Download for Windows — free](https://github.com/jrsmrtn/HOTS-Web-Administrated/releases/latest)
 
 *No account, no subscription, no ads.*
 

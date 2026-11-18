@@ -161,6 +161,15 @@ if len(sys.argv) >= 4 and sys.argv[1] == "--uninstall-apply":
     sys.exit(_run_uninstall_apply())
 
 
+# Remote administration agent (hosts_editor/remote/service.py): --agent-run is started by a
+# scheduled task as SYSTEM; the other --agent-* flags are used by the installer. Handled before
+# the GUI start-up code: no UAC relaunch, no single-instance lock, no window.
+if len(sys.argv) >= 2 and sys.argv[1].startswith("--agent-"):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from hosts_editor.remote.service import main as _agent_main
+    sys.exit(_agent_main(sys.argv, launcher_script=os.path.abspath(__file__)))
+
+
 log_path = Path(os.environ.get("APPDATA", Path.home())) / "HOTS Hosts" / "error.log"
 log_path.parent.mkdir(parents=True, exist_ok=True)
 try:

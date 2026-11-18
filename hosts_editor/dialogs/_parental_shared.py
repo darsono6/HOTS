@@ -14,30 +14,13 @@ from ..core_antispy import HostsLockError
 from ..widgets_qt import HOTSButton, HOTSDialog, attach_fluent_tip, colored_svg_icon
 from ..i18n import T
 from ..bg_tasks import start_bg_thread, is_shutting_down
+from ..parental_catalog import CATEGORIES, comment_for_category as _comment_for_category
 
 
 def _blocklists_dir() -> str:
     from ..resource_utils import blocklists_dir
     return blocklists_dir()
 
-
-CATEGORIES = [
-    {"label_key": "par_cat_twitter",     "icon": "🐦", "color": "#1DA1F2", "file": "twitter.txt"},
-    {"label_key": "par_cat_instagram",   "icon": "📸", "color": "#E1306C", "file": "instagram.txt"},
-    {"label_key": "par_cat_youtube",     "icon": "▶",  "color": "#FF0000", "file": "youtube.txt"},
-    {"label_key": "par_cat_facebook",    "icon": "👤", "color": "#1877F2", "file": "facebook.txt"},
-    {"label_key": "par_cat_whatsapp",    "icon": "💬", "color": "#25D366", "file": "whatsapp.txt"},
-    {"label_key": "par_cat_tiktok",      "icon": "🎵", "color": "#ff2d55", "file": "tiktok.txt"},
-    {"label_key": "par_cat_twitch",      "icon": "🎮", "color": "#9146FF", "file": "twitch.txt"},
-    {"label_key": "par_cat_snapchat",    "icon": "👻", "color": "#FFFC00", "file": "snapchat.txt"},
-    {"label_key": "par_cat_pinterest",   "icon": "📌", "color": "#E60023", "file": "pinterest.txt"},
-    {"label_key": "par_cat_reddit",      "icon": "🤖", "color": "#FF4500", "file": "reddit.txt"},
-    {"label_key": "par_cat_adult",       "icon": "🔞", "color": "#cc2222", "file": "adult.txt"},
-    {"label_key": "par_cat_games",       "icon": "🕹️", "color": "#7b2d8b", "file": "games.txt"},
-    {"label_key": "par_cat_torrent",     "icon": "⛔", "color": "#aaaaaa", "file": "torrent.txt"},
-    {"label_key": "par_cat_dating",      "icon": "💘", "color": "#ff5864", "file": "dating.txt"},
-    {"label_key": "par_cat_random_chat", "icon": "🎥", "color": "#00bcd4", "file": "random_chat.txt"},
-]
 
 _POPULAR_SERVICES_COUNT = 10
 
@@ -57,15 +40,6 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
         return hex_color
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"rgba({r},{g},{b},{alpha})"
-
-
-def _comment_for_category(cat: dict) -> str:
-    suffix = cat["file"][:-4] if cat["file"].endswith(".txt") else cat["file"]
-    name_key = f"par_comment_name_{suffix}"
-    name = T(name_key)
-    if name == name_key:
-        name = T(cat["label_key"])
-    return name
 
 
 _CATEGORY_COMMENT = {cat["file"]: _comment_for_category(cat) for cat in CATEGORIES}
